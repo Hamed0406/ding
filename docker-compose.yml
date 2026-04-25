@@ -1,0 +1,19 @@
+services:
+  ding:
+    build: .
+    # ARP must see the LAN — host networking is mandatory
+    network_mode: host
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    volumes:
+      - ./data:/data
+    environment:
+      DING_INTERFACE: wlp0s20f3
+      DING_SUBNET: 192.168.1.0/24
+      DING_PORTS: "22,80,443,8080,8443"
+      DING_TIMEOUT_MS: "500"
+      DING_DATA_PATH: /data/ding.json
+      DING_TELEGRAM_TOKEN: ""
+      DING_TELEGRAM_CHAT_ID: ""
+    restart: unless-stopped

@@ -1,0 +1,15 @@
+# Rust
+scanner/target/
+
+# Go
+controller/vendor/
+
+# Runtime data
+data/
+
+# IDE
+.idea/
+.vscode/
+
+# Claude Code
+.claude/
