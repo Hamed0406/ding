@@ -9,8 +9,9 @@ services:
     volumes:
       - ./data:/data
     environment:
-      DING_INTERFACE: wlp0s20f3
-      DING_SUBNET: 192.168.1.0/24
+      # Leave DING_INTERFACE and DING_SUBNET unset to auto-detect
+      # DING_INTERFACE: eth0
+      # DING_SUBNET: 192.168.1.0/24
       DING_PORTS: "22,80,443,8080,8443"
       DING_TIMEOUT_MS: "500"
       DING_DATA_PATH: /data/ding.json
