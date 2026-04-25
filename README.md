@@ -2,7 +2,7 @@
 
 A fast network scanner that answers: who is on your network, what are they, and what ports are open. Inspired by [Fing](https://www.fing.com/).
 
-**Architecture:** Rust handles low-level scanning (ARP, ICMP, TCP). Go handles orchestration, change detection, alerting, and storage. Docker ships both binaries — no host dependencies required.
+**Architecture:** Rust handles low-level scanning (ARP, ICMP, TCP). Go handles orchestration, change detection, alerting, storage, and serves the web UI. Docker ships everything — no host dependencies required.
 
 ---
 
@@ -18,55 +18,32 @@ A fast network scanner that answers: who is on your network, what are they, and 
 ```bash
 git clone <repo>
 cd ding
-```
-
-Find your LAN interface and subnet:
-
-```bash
-ip -4 addr show
-```
-
-Edit `docker-compose.yml` and set:
-
-```yaml
-DING_INTERFACE: eth0          # your LAN interface
-DING_SUBNET: 192.168.1.0/24  # your subnet
-```
-
-Build and run:
-
-```bash
 docker compose build
 docker compose up
 ```
 
-Or run a one-shot scan without compose:
+Then open **http://\<host-ip\>:8081** in a browser or on your Android device.
 
+The interface and subnet are auto-detected. To override, set `DING_INTERFACE` and `DING_SUBNET` in `docker-compose.yml`.
+
+Find your LAN interface and subnet:
 ```bash
-docker run --rm \
-  --network host \
-  --cap-add NET_RAW \
-  --cap-add NET_ADMIN \
-  -v "$(pwd)/data:/data" \
-  -e DING_INTERFACE=eth0 \
-  -e DING_SUBNET=192.168.1.0/24 \
-  ding-ding
+ip -4 addr show
 ```
 
 ---
 
-## Example output
+## Web UI
 
-```
-[NEW] 192.168.1.1 — mac=aa:bb:cc:dd:ee:ff ports=[80 443]
-[NEW] 192.168.1.42 — mac=11:22:33:44:55:66 ports=[22]
+The UI is a React PWA bundled into the Go binary. It works in any browser and is installable on Android from Chrome ("Add to Home Screen").
 
-192.168.1.1       aa:bb:cc:dd:ee:ff     alive=true   ports=[80 443]
-192.168.1.42      11:22:33:44:55:66     alive=true   ports=[22]
-192.168.1.100     de:ad:be:ef:00:01     alive=true   ports=[]
-```
-
-On subsequent runs only changes are printed (`[NEW]`, `[GONE]`, `[PORTS]`). All scans are saved to `./data/ding.json`.
+| Feature | Description |
+|---|---|
+| **Scan now** | Trigger an on-demand scan; results appear in real time via SSE |
+| **Device grid** | All discovered devices — IP, MAC, open ports, alive status |
+| **Changes feed** | NEW / GONE / PORTS changes highlighted with colour coding |
+| **Auto-detect** | Interface and subnet shown in the header |
+| **PWA** | Installable on Android home screen, works offline (cached shell) |
 
 ---
 
@@ -76,14 +53,41 @@ All options are set via environment variables.
 
 | Variable | Default | Description |
 |---|---|---|
-| `DING_INTERFACE` | `eth0` | Network interface to scan on |
-| `DING_SUBNET` | `192.168.1.0/24` | Target subnet in CIDR notation |
+| `DING_INTERFACE` | _(auto)_ | Network interface to scan on |
+| `DING_SUBNET` | _(auto)_ | Target subnet in CIDR notation |
 | `DING_PORTS` | `22,80,443,8080,8443` | TCP ports to probe on each host |
 | `DING_TIMEOUT_MS` | `500` | Per-host timeout in milliseconds |
 | `DING_DATA_PATH` | `/data/ding.json` | Where scan history is stored |
+| `DING_HTTP_ADDR` | `:8081` | Address the web server listens on |
+| `DING_SCAN_INTERVAL` | `60s` | Auto-scan interval (`""` = on-demand only) |
 | `DING_SCANNER_BIN` | `/usr/local/bin/scanner` | Path to Rust scanner binary |
 | `DING_TELEGRAM_TOKEN` | _(empty)_ | Telegram bot token for alerts |
 | `DING_TELEGRAM_CHAT_ID` | _(empty)_ | Telegram chat or channel ID |
+
+---
+
+## REST API
+
+The Go server exposes a small API used by the UI. You can also call it directly.
+
+```bash
+# Current status (interface, subnet, last scan time)
+curl http://localhost:8081/api/status
+
+# Latest device list
+curl http://localhost:8081/api/devices
+
+# Scan history (last 20 runs)
+curl http://localhost:8081/api/history
+
+# Trigger a scan (returns 202; results arrive via SSE)
+curl -X POST http://localhost:8081/api/scan
+
+# SSE stream (real-time events)
+curl -N http://localhost:8081/api/events
+```
+
+SSE event types: `connected`, `scan_start`, `scan_result`, `scan_error`.
 
 ---
 
@@ -102,64 +106,54 @@ DING_TELEGRAM_CHAT_ID: "987654321"
 
 ---
 
-## Running continuously
-
-`docker-compose.yml` sets `restart: unless-stopped`, so the container restarts after each scan. To add a delay between scans, wrap the entrypoint in a loop:
-
-```yaml
-entrypoint: ["/bin/sh", "-c", "while true; do /usr/local/bin/ding; sleep 60; done"]
-```
-
----
-
 ## Scan data
 
-Results are stored in `./data/ding.json` (mounted into the container). The file holds the last 100 scans in JSON format and is human-readable:
-
-```json
-[
-  {
-    "scanned_at": "2026-04-25T10:00:00Z",
-    "results": [
-      { "ip": "192.168.1.1", "mac": "aa:bb:cc:dd:ee:ff", "open_ports": [80, 443], "alive": true }
-    ]
-  }
-]
-```
+Results are stored in `./data/ding.json` (mounted into the container). The file holds the last 100 scans in JSON format.
 
 ---
 
 ## How it works
 
 ```
-docker run
-  └── Go controller (ding)
-        ├── spawns Rust binary (scanner) as subprocess
-        │     ├── ARP broadcast → discovers IPs + MACs
-        │     ├── ICMP echo    → confirms liveness
-        │     └── TCP connect  → finds open ports
-        │     └── prints JSON to stdout
-        ├── diffs results against last scan → detects NEW / GONE / PORTS changes
-        ├── saves results to /data/ding.json
-        └── sends Telegram alert (if configured)
+Browser / Android PWA
+  └── GET /            ← React SPA (embedded in Go binary via go:embed)
+  └── GET /api/events  ← SSE stream (real-time scan events)
+  └── POST /api/scan   ← trigger scan
+
+Go controller (ding)
+  ├── serves HTTP on :8081
+  ├── spawns Rust scanner binary as subprocess
+  │     ├── ARP broadcast  → discovers IPs + MACs
+  │     ├── ICMP echo      → confirms liveness
+  │     └── TCP connect    → finds open ports
+  │     └── prints JSON to stdout
+  ├── diffs results against last scan → NEW / GONE / PORTS
+  ├── saves results to /data/ding.json
+  ├── pushes scan events to all SSE clients
+  └── sends Telegram alert (if configured)
 ```
 
 ---
 
 ## Building from source
 
-Rust and Go toolchains are not required on the host — the multi-stage Dockerfile handles everything.
+Rust, Go, and Node toolchains are not required on the host — the multi-stage Dockerfile handles everything.
 
 ```bash
 docker compose build
 ```
 
-To build locally (requires Rust ≥ 1.75 and Go ≥ 1.22):
+To build locally for development:
 
 ```bash
-# Rust scanner
+# 1. Build and watch the React UI (Vite dev server on :5173, proxies /api to :8081)
+cd ui && npm install && npm run dev
+
+# 2. Build the Rust scanner
 cd scanner && cargo build --release
 
-# Go controller
-cd controller && go build ./cmd/ding
+# 3. Run the Go controller (serving API on :8081)
+cd controller
+cp -r ../ui/dist ./internal/api/static/
+DING_SCANNER_BIN=../scanner/target/release/scanner go run ./cmd/ding
 ```

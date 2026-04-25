@@ -11,7 +11,7 @@ import (
 
 const maxRecords = 100
 
-type record struct {
+type Record struct {
 	ScannedAt time.Time        `json:"scanned_at"`
 	Results   []scanner.Result `json:"results"`
 }
@@ -29,7 +29,7 @@ func New(path string) (*Store, error) {
 
 func (s *Store) Save(results []scanner.Result) error {
 	records, _ := s.load()
-	records = append(records, record{ScannedAt: time.Now().UTC(), Results: results})
+	records = append(records, Record{ScannedAt: time.Now().UTC(), Results: results})
 	if len(records) > maxRecords {
 		records = records[len(records)-maxRecords:]
 	}
@@ -40,16 +40,35 @@ func (s *Store) Save(results []scanner.Result) error {
 	return os.WriteFile(s.path, data, 0o644)
 }
 
-// Latest returns the results from the most recent scan, or nil if none.
+// Latest returns results from the most recent scan, or nil if none exists.
 func (s *Store) Latest() []scanner.Result {
+	r := s.LatestRecord()
+	if r == nil {
+		return nil
+	}
+	return r.Results
+}
+
+// LatestRecord returns the full most recent scan record, or nil if none exists.
+func (s *Store) LatestRecord() *Record {
 	records, err := s.load()
 	if err != nil || len(records) == 0 {
 		return nil
 	}
-	return records[len(records)-1].Results
+	r := records[len(records)-1]
+	return &r
 }
 
-func (s *Store) load() ([]record, error) {
+// History returns the last n scan records (oldest first).
+func (s *Store) History(n int) []Record {
+	records, _ := s.load()
+	if len(records) <= n {
+		return records
+	}
+	return records[len(records)-n:]
+}
+
+func (s *Store) load() ([]Record, error) {
 	data, err := os.ReadFile(s.path)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -57,6 +76,6 @@ func (s *Store) load() ([]record, error) {
 	if err != nil {
 		return nil, err
 	}
-	var records []record
+	var records []Record
 	return records, json.Unmarshal(data, &records)
 }

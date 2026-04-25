@@ -1,12 +1,28 @@
+// ============================================================
+// scanner/src/main.rs — Entry point for the Rust scanner binary
+//
+// This binary is called by the Go controller as a subprocess.
+// It scans the network using three techniques in order:
+//   1. ARP  — broadcasts "who has this IP?" to find devices
+//   2. ICMP — sends a ping to confirm each device is alive
+//   3. TCP  — tries to connect to specific ports on each device
+//
+// Results are printed as a JSON array to stdout.
+// The Go controller reads that JSON and does the rest.
+// ============================================================
+
 use anyhow::Result;
 use clap::Parser;
 use std::net::Ipv4Addr;
 
+// Bring in our other modules (one file per scan technique)
 mod arp;
 mod ping;
 mod tcp;
 mod types;
 
+// Command-line arguments — clap fills these in automatically from what Go passes.
+// Example: scanner --interface eth0 --subnet 192.168.1.0/24 --ports 22,80,443
 #[derive(Parser)]
 #[command(name = "scanner", about = "Ding low-level network scanner")]
 struct Args {
@@ -30,28 +46,35 @@ struct Args {
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    // Convert the ports string "22,80,443" into a list of numbers [22, 80, 443]
     let ports: Vec<u16> = args
         .ports
         .split(',')
-        .filter_map(|p| p.trim().parse().ok())
+        .filter_map(|p| p.trim().parse().ok()) // skip anything that isn't a valid number
         .collect();
 
+    // Turn "192.168.1.0/24" into a list of every possible host IP in that range
     let hosts = subnet_hosts(&args.subnet)?;
 
-    // ARP discovery — only alive hosts are returned
+    // Step 1 — ARP scan: send a broadcast message asking each IP "are you there?"
+    // Only devices that reply are included in `results`.
     let mut results = arp::scan(&args.interface, &hosts, args.timeout_ms)?;
 
-    // ICMP ping for hosts that didn't respond to ARP (e.g. different subnet)
+    // Step 2 — ICMP ping: double-check each found device is still alive
     ping::check_alive(&mut results, args.timeout_ms)?;
 
-    // TCP port scan on every discovered host
+    // Step 3 — TCP port scan: try to connect to each port on each device
     tcp::scan_ports(&mut results, &ports, args.timeout_ms)?;
 
+    // Print the final results as JSON to stdout — Go reads this
     println!("{}", serde_json::to_string(&results)?);
     Ok(())
 }
 
+// Convert a subnet like "192.168.1.0/24" into a list of individual IP addresses.
+// /24 means the last number can be 1–254, giving 254 hosts.
 fn subnet_hosts(cidr: &str) -> Result<Vec<Ipv4Addr>> {
+    // Split "192.168.1.0/24" into base="192.168.1.0" and prefix="24"
     let (base_str, prefix_str) = cidr
         .split_once('/')
         .ok_or_else(|| anyhow::anyhow!("invalid CIDR: {}", cidr))?;
@@ -59,12 +82,14 @@ fn subnet_hosts(cidr: &str) -> Result<Vec<Ipv4Addr>> {
     let base: Ipv4Addr = base_str.parse()?;
     let prefix: u32 = prefix_str.parse()?;
 
+    // /31 and /32 have no usable hosts, so we require at most /30
     anyhow::ensure!(prefix <= 30, "prefix must be ≤ 30 (got {})", prefix);
 
-    let mask = !0u32 << (32 - prefix);
-    let network = u32::from(base) & mask;
-    let broadcast = network | !mask;
+    // Bit-math to find the first and last address in the subnet
+    let mask = !0u32 << (32 - prefix);      // e.g. /24 → 255.255.255.0
+    let network = u32::from(base) & mask;   // first address (e.g. 192.168.1.0)
+    let broadcast = network | !mask;        // last address  (e.g. 192.168.1.255)
 
-    // Exclude network address and broadcast
+    // Return every address between the network address and broadcast (exclusive)
     Ok((network + 1..broadcast).map(Ipv4Addr::from).collect())
 }

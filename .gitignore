@@ -11,5 +11,13 @@ data/
 .idea/
 .vscode/
 
+# UI
+ui/node_modules/
+ui/dist/
+
+# Built static assets (populated by Dockerfile from ui/dist — not committed)
+controller/internal/api/static/*
+!controller/internal/api/static/.gitkeep
+
 # Claude Code
 .claude/

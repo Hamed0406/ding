@@ -16,9 +16,9 @@ const (
 )
 
 type Change struct {
-	Kind ChangeKind
-	IP   string
-	Desc string
+	Kind ChangeKind `json:"kind"`
+	IP   string     `json:"ip"`
+	Desc string     `json:"desc"`
 }
 
 func (c Change) String() string {
