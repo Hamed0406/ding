@@ -6,8 +6,22 @@ name: CI
 on:
   push:
     branches: [main]
+    # Skip CI when a push only touches docs or runtime config.
+    # Dockerfile is intentionally NOT ignored — it affects how the image builds.
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - 'docker-compose.yml'
+      - '.gitignore'
+      - '.gitattributes'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - 'docker-compose.yml'
+      - '.gitignore'
+      - '.gitattributes'
 
 # Cancel older runs on the same branch when a new commit is pushed.
 concurrency:
