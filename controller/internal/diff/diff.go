@@ -40,10 +40,14 @@ func Compare(previous, current []scanner.Result) []Change {
 			if r.Hostname != nil {
 				host = " host=" + *r.Hostname
 			}
+			vendorDesc := ""
+			if r.Vendor != nil {
+				vendorDesc = " vendor=" + *r.Vendor
+			}
 			changes = append(changes, Change{
 				Kind: KindNew,
 				IP:   ip,
-				Desc: fmt.Sprintf("mac=%s%s ports=%v", mac, host, r.OpenPorts),
+				Desc: fmt.Sprintf("mac=%s%s%s ports=%v", mac, host, vendorDesc, r.OpenPorts),
 			})
 			continue
 		}

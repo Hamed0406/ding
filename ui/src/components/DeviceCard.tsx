@@ -38,6 +38,11 @@ export function DeviceCard({ device, isNew }: Props) {
         {device.mac ?? '—'}
       </p>
 
+      {/* Vendor (manufacturer) — looked up from MAC, only shown if known */}
+      {device.vendor && (
+        <p className="text-xs text-slate-500 truncate">{device.vendor}</p>
+      )}
+
       {/* Hostname — only shown if we have one */}
       {device.hostname && (
         <p className="text-xs text-slate-400 truncate">{device.hostname}</p>

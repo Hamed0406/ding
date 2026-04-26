@@ -11,6 +11,7 @@ type Result struct {
 	IP        string   `json:"ip"`
 	MAC       *string  `json:"mac"`
 	Hostname  *string  `json:"hostname"`
+	Vendor    *string  `json:"vendor"`
 	OpenPorts []uint16 `json:"open_ports"`
 	Alive     bool     `json:"alive"`
 }

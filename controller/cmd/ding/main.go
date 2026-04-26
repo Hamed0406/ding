@@ -29,6 +29,7 @@ import (
 	"github.com/ding/ding/internal/iface"
 	"github.com/ding/ding/internal/scanner"
 	"github.com/ding/ding/internal/storage"
+	"github.com/ding/ding/internal/vendor"
 )
 
 func main() {
@@ -57,6 +58,10 @@ func main() {
 		// Resolve hostnames via reverse DNS (best-effort, runs in parallel).
 		// Devices without a PTR record simply stay unnamed.
 		enrich.Hostnames(results, 16, 300*time.Millisecond)
+
+		// Tag each device with its MAC vendor (Apple, Cisco, etc.).
+		// Pure in-memory lookup against the embedded IEEE OUI database.
+		vendor.Annotate(results)
 
 		// Load what we found last time so we can compare
 		previous := store.Latest()
