@@ -13,6 +13,8 @@ pub struct ScanResult {
     pub hostname: Option<String>, // human-readable name (None — not yet implemented)
     pub open_ports: Vec<u16>,     // list of open TCP ports, e.g. [22, 80, 443]
     pub alive: bool,              // true if the device responded to ARP or ICMP ping
+    pub gateway: Option<String>,  // default gateway IP, e.g. "192.168.1.1" (same for all hosts)
+    pub ttl: Option<u8>,          // TTL from ICMP reply — infers hop count (64=direct, 63=1 hop, etc.)
 }
 
 impl ScanResult {
@@ -24,6 +26,8 @@ impl ScanResult {
             hostname: None,
             open_ports: Vec::new(),
             alive: false,
+            gateway: None,
+            ttl: None,
         }
     }
 }

@@ -21,7 +21,7 @@ use std::time::Duration;
 use crate::types::ScanResult;
 
 // Send an ICMP ping to each device and mark it alive if it replies.
-// `results` is modified in place — we update the `alive` field.
+// `results` is modified in place — we update the `alive` and `ttl` fields.
 pub fn check_alive(results: &mut [ScanResult], timeout_ms: u64) -> Result<()> {
     // Open a raw ICMP socket — Layer4 means we handle ICMP ourselves
     let protocol = Layer4(Ipv4(IpNextHeaderProtocols::Icmp));
@@ -54,7 +54,9 @@ pub fn check_alive(results: &mut [ScanResult], timeout_ms: u64) -> Result<()> {
 
         // Wait up to `timeout` for an ICMP reply from exactly this IP
         match iter.next_with_timeout(timeout)? {
-            Some((_, addr)) if addr == ip => result.alive = true, // got a reply → alive!
+            Some((_, addr)) if addr == ip => {
+                result.alive = true; // got a reply → alive!
+            }
             _ => {} // no reply within timeout → stays alive=false
         }
     }

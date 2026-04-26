@@ -36,6 +36,31 @@ export interface HistoryEntry {
   results: Device[]   // all devices found at that time
 }
 
+// --- Topology types (returned by GET /api/topology) ---
+
+// One node in the network topology graph
+export interface TopologyNode {
+  id: string                // IP address
+  label: string             // display name (hostname or IP)
+  type: 'gateway' | 'device'
+  mac?: string
+  vendor?: string
+  open_ports?: number[]
+  alive: boolean
+}
+
+// One edge (connection) between two topology nodes
+export interface TopologyEdge {
+  from: string  // source node ID (usually gateway)
+  to: string    // target node ID
+}
+
+// Complete topology graph
+export interface TopologyGraph {
+  nodes: TopologyNode[]
+  edges: TopologyEdge[]
+}
+
 // Every possible SSE event the server can push to the browser.
 // TypeScript's union type (|) means it's one of these shapes.
 export type SseEvent =

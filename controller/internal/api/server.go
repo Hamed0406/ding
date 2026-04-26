@@ -66,11 +66,12 @@ func NewServer(cfg Config, store *storage.Store, broker *Broker, scanFn ScanFunc
 	s.mux = http.NewServeMux()
 
 	// API routes — these return JSON data
-	s.mux.HandleFunc("GET /api/status", s.handleStatus)   // interface, subnet, last scan time
-	s.mux.HandleFunc("GET /api/devices", s.handleDevices) // current device list
-	s.mux.HandleFunc("GET /api/history", s.handleHistory) // last 20 scan records
-	s.mux.HandleFunc("POST /api/scan", s.handleScan)      // trigger a new scan
-	s.mux.HandleFunc("GET /api/events", s.broker.serveSSE) // SSE stream
+	s.mux.HandleFunc("GET /api/status", s.handleStatus)       // interface, subnet, last scan time
+	s.mux.HandleFunc("GET /api/devices", s.handleDevices)     // current device list
+	s.mux.HandleFunc("GET /api/history", s.handleHistory)     // last 20 scan records
+	s.mux.HandleFunc("GET /api/topology", s.handleTopology)   // network topology graph
+	s.mux.HandleFunc("POST /api/scan", s.handleScan)          // trigger a new scan
+	s.mux.HandleFunc("GET /api/events", s.broker.serveSSE)    // SSE stream
 
 	// Everything else (/, /assets/..., etc.) serves the React app
 	sub, _ := fs.Sub(staticFiles, "static") // strip the "static/" prefix

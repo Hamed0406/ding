@@ -18,6 +18,7 @@ import { ChangesFeed } from './components/ChangesFeed'
 import { DeviceGrid } from './components/DeviceGrid'
 import { ScanButton } from './components/ScanButton'
 import { StatusBar } from './components/StatusBar'
+import { TopologyMap } from './components/TopologyMap'
 import { useEvents } from './hooks/useEvents'
 import type { Change, Device, Status } from './types'
 
@@ -28,6 +29,7 @@ export default function App() {
   const [newIPs, setNewIPs] = useState<Set<string>>(new Set()) // IPs that are brand new (for the green badge)
   const [status, setStatus] = useState<Status | null>(null) // header info (interface, subnet, time)
   const [scanning, setScanning] = useState(false)           // true while a scan is running
+  const [view, setView] = useState<'grid' | 'topology'>('grid') // current view mode
 
   // --- Initial data load ---
   // When the page first loads, fetch the current status and device list from the server.
@@ -87,7 +89,7 @@ export default function App() {
       {/* ---- Main content ---- */}
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
 
-        {/* Scan button + device count */}
+        {/* Scan button + device count + view toggle */}
         <div className="flex items-center gap-4">
           <ScanButton scanning={scanning} onScan={handleScan} />
           <span className="text-slate-500 text-sm">
@@ -95,13 +97,42 @@ export default function App() {
               ? `${devices.length} device${devices.length !== 1 ? 's' : ''} found`
               : 'No scan data yet'}
           </span>
+          {/* View toggle: Grid ↔ Topology */}
+          <div className="ml-auto flex rounded-lg bg-slate-800 border border-slate-700 p-0.5">
+            <button
+              onClick={() => setView('grid')}
+              className={[
+                'px-3 py-1 text-xs font-medium rounded-md transition-colors',
+                view === 'grid'
+                  ? 'bg-slate-700 text-slate-100'
+                  : 'text-slate-400 hover:text-slate-200',
+              ].join(' ')}
+            >
+              Grid
+            </button>
+            <button
+              onClick={() => setView('topology')}
+              className={[
+                'px-3 py-1 text-xs font-medium rounded-md transition-colors',
+                view === 'topology'
+                  ? 'bg-slate-700 text-slate-100'
+                  : 'text-slate-400 hover:text-slate-200',
+              ].join(' ')}
+            >
+              Topology
+            </button>
+          </div>
         </div>
 
         {/* Changes since last scan (hidden when empty) */}
         <ChangesFeed changes={changes} />
 
-        {/* Grid of device cards */}
-        <DeviceGrid devices={devices} newIPs={newIPs} />
+        {/* View: either device grid or topology map */}
+        {view === 'grid' ? (
+          <DeviceGrid devices={devices} newIPs={newIPs} />
+        ) : (
+          <TopologyMap />
+        )}
 
       </main>
     </div>

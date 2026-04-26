@@ -17,6 +17,7 @@ import (
 
 	"github.com/ding/ding/internal/scanner"
 	"github.com/ding/ding/internal/storage"
+	"github.com/ding/ding/internal/topology"
 )
 
 // writeJSON is a helper that sends any value as a JSON response.
@@ -80,4 +81,16 @@ func (s *Server) handleScan(w http.ResponseWriter, _ *http.Request) {
 	}
 	go s.runScan()              // start scan in the background
 	w.WriteHeader(http.StatusAccepted) // 202 = "got it, working on it"
+}
+
+// handleTopology responds to GET /api/topology
+// Returns a graph of nodes and edges built from the latest scan results.
+// The UI uses this to render the network topology map.
+func (s *Server) handleTopology(w http.ResponseWriter, _ *http.Request) {
+	devices := s.store.Latest()
+	if devices == nil {
+		devices = []scanner.Result{}
+	}
+	graph := topology.Build(devices)
+	writeJSON(w, http.StatusOK, graph)
 }

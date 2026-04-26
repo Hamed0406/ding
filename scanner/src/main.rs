@@ -17,6 +17,7 @@ use std::net::Ipv4Addr;
 
 // Bring in our other modules (one file per scan technique)
 mod arp;
+mod gateway;
 mod ping;
 mod tcp;
 mod types;
@@ -65,6 +66,16 @@ fn main() -> Result<()> {
 
     // Step 3 — TCP port scan: try to connect to each port on each device
     tcp::scan_ports(&mut results, &ports, args.timeout_ms)?;
+
+    // Step 4 — Gateway detection: find the default gateway for this interface
+    // and tag every result with it (topology uses this to build the graph)
+    let gw = gateway::detect(&args.interface)?;
+    if let Some(gw_ip) = gw {
+        let gw_str = gw_ip.to_string();
+        for r in results.iter_mut() {
+            r.gateway = Some(gw_str.clone());
+        }
+    }
 
     // Print the final results as JSON to stdout — Go reads this
     println!("{}", serde_json::to_string(&results)?);

@@ -14,6 +14,8 @@ type Result struct {
 	Vendor    *string  `json:"vendor"`
 	OpenPorts []uint16 `json:"open_ports"`
 	Alive     bool     `json:"alive"`
+	Gateway   *string  `json:"gateway,omitempty"`
+	TTL       *uint8   `json:"ttl,omitempty"`
 }
 
 // Run invokes the Rust scanner binary and returns parsed results.

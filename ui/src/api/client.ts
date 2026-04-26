@@ -5,7 +5,7 @@
 // Each function maps to one REST endpoint on the Go server.
 // ============================================================
 
-import type { Device, HistoryEntry, Status } from '../types'
+import type { Device, HistoryEntry, Status, TopologyGraph } from '../types'
 
 // Generic helper: fetch a URL and parse the response as JSON.
 // Throws an error if the HTTP status is not OK (e.g. 404, 500).
@@ -23,6 +23,9 @@ export const fetchDevices = () => get<Device[]>('/api/devices')
 
 // GET /api/history — returns the last 20 scan records
 export const fetchHistory = () => get<HistoryEntry[]>('/api/history')
+
+// GET /api/topology — returns the network topology graph (nodes + edges)
+export const fetchTopology = () => get<TopologyGraph>('/api/topology')
 
 // POST /api/scan — asks the server to start a new scan right now.
 // The server responds with 202 (Accepted) immediately.
