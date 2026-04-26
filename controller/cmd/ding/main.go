@@ -25,6 +25,7 @@ import (
 	"github.com/ding/ding/internal/alert"
 	"github.com/ding/ding/internal/api"
 	"github.com/ding/ding/internal/diff"
+	"github.com/ding/ding/internal/enrich"
 	"github.com/ding/ding/internal/iface"
 	"github.com/ding/ding/internal/scanner"
 	"github.com/ding/ding/internal/storage"
@@ -52,6 +53,10 @@ func main() {
 		if err != nil {
 			return nil, nil, err
 		}
+
+		// Resolve hostnames via reverse DNS (best-effort, runs in parallel).
+		// Devices without a PTR record simply stay unnamed.
+		enrich.Hostnames(results, 16, 300*time.Millisecond)
 
 		// Load what we found last time so we can compare
 		previous := store.Latest()

@@ -40,7 +40,8 @@ The UI is a React PWA bundled into the Go binary. It works in any browser and is
 | Feature | Description |
 |---|---|
 | **Scan now** | Trigger an on-demand scan; results appear in real time via SSE |
-| **Device grid** | All discovered devices — IP, MAC, open ports, alive status |
+| **Device grid** | All discovered devices — IP, MAC, hostname, open ports, alive status |
+| **Hostnames** | Reverse-DNS lookup runs in parallel after every scan (best-effort, 300ms per host) |
 | **Changes feed** | NEW / GONE / PORTS changes highlighted with colour coding |
 | **Auto-detect** | Interface and subnet shown in the header |
 | **PWA** | Installable on Android home screen, works offline (cached shell) |
@@ -127,6 +128,7 @@ Go controller (ding)
   │     ├── ICMP echo      → confirms liveness
   │     └── TCP connect    → finds open ports
   │     └── prints JSON to stdout
+  ├── reverse-DNS lookup   → fills in hostnames (parallel, best-effort)
   ├── diffs results against last scan → NEW / GONE / PORTS
   ├── saves results to /data/ding.json
   ├── pushes scan events to all SSE clients
@@ -137,23 +139,91 @@ Go controller (ding)
 
 ## Building from source
 
-Rust, Go, and Node toolchains are not required on the host — the multi-stage Dockerfile handles everything.
+### Build with Docker (recommended)
+
+The multi-stage Dockerfile builds everything inside containers — no host toolchains needed.
 
 ```bash
-docker compose build
+docker compose build           # builds UI, Rust scanner, Go controller
+docker compose up              # start (foreground)
+docker compose up -d           # start (detached)
+docker compose up --build      # rebuild + start in one shot
+docker compose down            # stop and remove the container
+docker compose logs -f         # tail logs
 ```
 
-To build locally for development:
+The build is layer-cached: changing only Go code reuses the UI and Rust stages, and vice versa.
+
+### Run locally for development
+
+Useful when iterating on a single component (UI hot-reload, Rust logging, Go debugging).
+
+**Prerequisites**
+
+| Toolchain | Version | Used for |
+|---|---|---|
+| Rust | 1.70+ (stable) | `scanner/` |
+| Go | 1.22+ | `controller/` |
+| Node | 22+ (with npm) | `ui/` |
+
+You also need `sudo` (or `CAP_NET_RAW` + `CAP_NET_ADMIN`) to run the scanner — ARP and ICMP need raw sockets.
+
+**1. Build the Rust scanner**
 
 ```bash
-# 1. Build and watch the React UI (Vite dev server on :5173, proxies /api to :8081)
-cd ui && npm install && npm run dev
+cd scanner
+cargo build --release          # output: target/release/scanner
+cargo test                     # optional
+```
 
-# 2. Build the Rust scanner
-cd scanner && cargo build --release
+Quick standalone smoke test (replace `eth0` and the subnet with your own):
 
-# 3. Run the Go controller (serving API on :8081)
+```bash
+sudo ./target/release/scanner --interface eth0 --subnet 192.168.1.0/24
+```
+
+**2. Build the React UI**
+
+Two modes — pick one:
+
+```bash
+cd ui
+npm install
+
+# Mode A — hot-reload dev server on :5173, proxies /api to :8081
+npm run dev
+
+# Mode B — production build (output: dist/), needed before running the Go binary standalone
+npm run build
+```
+
+**3. Run the Go controller**
+
+```bash
 cd controller
-cp -r ../ui/dist ./internal/api/static/
-DING_SCANNER_BIN=../scanner/target/release/scanner go run ./cmd/ding
+
+# go:embed needs static/ to be non-empty at compile time.
+# Copy the UI build output in (only needed if you used Mode B above).
+cp -r ../ui/dist/* ./internal/api/static/
+
+# Run the controller. Sudo is required because the spawned scanner needs raw sockets.
+sudo DING_SCANNER_BIN=../scanner/target/release/scanner \
+     DING_HTTP_ADDR=:8081 \
+     go run ./cmd/ding
 ```
+
+Open <http://localhost:8081>. If you're using UI Mode A (Vite), open <http://localhost:5173> instead — it proxies API calls to the Go server.
+
+**Run the tests**
+
+```bash
+cd controller && go test ./...
+cd scanner    && cargo test
+cd ui         && npm run build      # type-checks via tsc
+```
+
+**Common pitfalls**
+
+- *`pattern static: cannot embed directory static: contains no embeddable files`* — `controller/internal/api/static/` is empty. Run `npm run build` in `ui/` and copy `dist/*` in (see step 3).
+- *`interface "..." not found or has no IPv4 address`* — list interfaces with `ip -4 addr show` and pass a real one via `DING_INTERFACE`.
+- *Empty scan results* — you probably ran without `sudo`. ARP/ICMP need `CAP_NET_RAW`.
