@@ -22,7 +22,7 @@ use crate::types::ScanResult;
 
 // Send an ICMP ping to each device and mark it alive if it replies.
 // `results` is modified in place — we update the `alive` field.
-pub fn check_alive(results: &mut Vec<ScanResult>, timeout_ms: u64) -> Result<()> {
+pub fn check_alive(results: &mut [ScanResult], timeout_ms: u64) -> Result<()> {
     // Open a raw ICMP socket — Layer4 means we handle ICMP ourselves
     let protocol = Layer4(Ipv4(IpNextHeaderProtocols::Icmp));
     let (mut tx, mut rx) = transport_channel(4096, protocol)?;

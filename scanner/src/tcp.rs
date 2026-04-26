@@ -21,7 +21,7 @@ use crate::types::ScanResult;
 
 // Try each port on each discovered device and record which ones are open.
 // `results` is modified in place — we fill in the `open_ports` field.
-pub fn scan_ports(results: &mut Vec<ScanResult>, ports: &[u16], timeout_ms: u64) -> Result<()> {
+pub fn scan_ports(results: &mut [ScanResult], ports: &[u16], timeout_ms: u64) -> Result<()> {
     let timeout = Duration::from_millis(timeout_ms);
 
     for result in results.iter_mut() {
