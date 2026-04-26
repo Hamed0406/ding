@@ -13,23 +13,78 @@ A fast network scanner that answers: who is on your network, what are they, and 
 
 ---
 
-## Quick start
+## Install from Docker Hub
+
+Pre-built images are published to **[hamed0406/ding](https://hub.docker.com/r/hamed0406/ding)** for both `linux/amd64` and `linux/arm64` (Raspberry Pi-friendly). No source checkout needed.
+
+### One-liner
 
 ```bash
-git clone <repo>
-cd ding
-docker compose build
-docker compose up
+docker run -d \
+  --name ding \
+  --network host \
+  --cap-add NET_RAW --cap-add NET_ADMIN \
+  -v ding-data:/data \
+  hamed0406/ding:latest
 ```
 
-Then open **http://\<host-ip\>:8081** in a browser or on your Android device.
+Then open **http://\<host-ip\>:8081**.
 
-The interface and subnet are auto-detected. To override, set `DING_INTERFACE` and `DING_SUBNET` in `docker-compose.yml`.
+### docker-compose (recommended)
 
-Find your LAN interface and subnet:
+Save this as `docker-compose.yml`:
+
+```yaml
+services:
+  ding:
+    image: hamed0406/ding:latest
+    network_mode: host          # ARP needs to see the LAN
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    volumes:
+      - ./data:/data
+    environment:
+      # Leave DING_INTERFACE / DING_SUBNET unset to auto-detect
+      DING_PORTS: "22,80,443,8080,8443"
+      DING_HTTP_ADDR: ":8081"
+      DING_SCAN_INTERVAL: "60s"
+      # Optional Telegram alerts:
+      # DING_TELEGRAM_TOKEN: "..."
+      # DING_TELEGRAM_CHAT_ID: "..."
+    restart: unless-stopped
+```
+
+Then:
+
+```bash
+docker compose up -d                            # start
+docker compose logs -f                          # tail logs
+docker compose pull && docker compose up -d     # upgrade to newest :latest
+docker compose down                             # stop
+```
+
+### Picking a tag
+
+`hamed0406/ding` is one repository — the tags are just labels pointing at builds.
+
+| Tag | When to use it |
+|---|---|
+| `1.2.3` | **Production.** Pinned, immutable, no surprise upgrades. |
+| `1.2` | Latest patch of `1.2.x` — auto-upgrades on bug fixes |
+| `1`   | Latest `1.x.x` release |
+| `latest` | Demos. Moves under you — not for production. |
+| `main-<sha>` | Bleeding-edge build from `main`. Unstable. |
+
+A single tag is multi-arch — Docker picks `amd64` or `arm64` for you automatically.
+
+### Find your interface and subnet (only if auto-detect picks the wrong one)
+
 ```bash
 ip -4 addr show
 ```
+
+Then set `DING_INTERFACE` and `DING_SUBNET` in the compose file.
 
 ---
 
