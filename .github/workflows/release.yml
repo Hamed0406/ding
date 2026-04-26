@@ -2,9 +2,8 @@
 # Builds a multi-arch Docker image, pushes it to Docker Hub + GHCR,
 # and creates a GitHub Release with auto-generated changelog notes.
 #
-# Required repo secrets (Settings → Secrets and variables → Actions):
-#   DOCKERHUB_USERNAME — your Docker Hub username
-#   DOCKERHUB_TOKEN    — a Docker Hub access token (Account Settings → Security)
+# Required repo secret (Settings → Secrets and variables → Actions):
+#   DOCKERHUB_TOKEN — a Docker Hub access token (Account Settings → Security)
 #
 # GHCR (ghcr.io) authenticates automatically via the built-in GITHUB_TOKEN —
 # no extra secret needed.
@@ -23,6 +22,9 @@ permissions:
   contents: write   # needed by softprops/action-gh-release to create the release
   packages: write   # needed to push to ghcr.io
 
+env:
+  DOCKERHUB_IMAGE: hamed0406/ding
+
 jobs:
   release:
     name: Build, push, release
@@ -38,7 +40,7 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: hamed0406
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GitHub Container Registry
@@ -56,7 +58,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/ding
+            ${{ env.DOCKERHUB_IMAGE }}
             ghcr.io/${{ github.repository_owner }}/ding
           tags: |
             type=semver,pattern={{version}}
@@ -95,8 +97,8 @@ jobs:
 
             Pulled from Docker Hub:
             ```bash
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/ding:${{ github.ref_name }}
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/ding:latest
+            docker pull ${{ env.DOCKERHUB_IMAGE }}:${{ github.ref_name }}
+            docker pull ${{ env.DOCKERHUB_IMAGE }}:latest
             ```
 
             Pulled from GitHub Container Registry:
