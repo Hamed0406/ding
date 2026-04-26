@@ -1,0 +1,104 @@
+# Continuous Integration — runs on every push to main and on every PR.
+# Purpose: catch breakage early. No artifacts published from this workflow.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel older runs on the same branch when a new commit is pushed.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust scanner
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scanner
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: scanner -> target
+
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo build --release
+      - run: cargo test --release
+
+  go:
+    name: Go controller
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: controller
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: controller/go.sum
+
+      # go:embed needs static/ to be non-empty at compile time.
+      # The Dockerfile fills this from ui/dist; in CI we drop a placeholder
+      # so the package compiles for vet/test purposes.
+      - name: Seed embed placeholder
+        run: |
+          mkdir -p internal/api/static
+          echo "ci-placeholder" > internal/api/static/index.html
+
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test -race ./...
+
+  ui:
+    name: React UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      # Use install (not ci) — the Dockerfile uses install too because
+      # package-lock.json is not committed in some setups.
+      - run: npm install
+      - run: npm run build
+
+  docker:
+    name: Docker image (smoke build)
+    runs-on: ubuntu-latest
+    needs: [rust, go, ui]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build (do not push) to verify the multi-stage Dockerfile still works.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: ding:ci

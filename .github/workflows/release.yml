@@ -1,0 +1,109 @@
+# Release pipeline — fires when you push a semver tag like v1.2.3.
+# Builds a multi-arch Docker image, pushes it to Docker Hub + GHCR,
+# and creates a GitHub Release with auto-generated changelog notes.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   DOCKERHUB_USERNAME — your Docker Hub username
+#   DOCKERHUB_TOKEN    — a Docker Hub access token (Account Settings → Security)
+#
+# GHCR (ghcr.io) authenticates automatically via the built-in GITHUB_TOKEN —
+# no extra secret needed.
+#
+# How to cut a release:
+#   git tag v1.2.3
+#   git push origin v1.2.3
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write   # needed by softprops/action-gh-release to create the release
+  packages: write   # needed to push to ghcr.io
+
+jobs:
+  release:
+    name: Build, push, release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so changelog generation can diff tags
+
+      - uses: docker/setup-qemu-action@v3   # enables arm64 builds on amd64 runners
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Generates a tag matrix from the git ref. For tag v1.2.3 you get:
+      #   <user>/ding:1.2.3, :1.2, :1, :latest, :sha-<short>
+      # Same set is produced for ghcr.io/<owner>/ding.
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/ding
+            ghcr.io/${{ github.repository_owner }}/ding
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=ding
+            org.opencontainers.image.description=Hybrid Rust+Go network scanner
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Build and push (linux/amd64, linux/arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Auto-generates release notes from commit messages between this tag
+      # and the previous tag (using GitHub's built-in generator).
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}   # v1.2.3-rc1 → prerelease
+          body: |
+            ## Docker images
+
+            Pulled from Docker Hub:
+            ```bash
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/ding:${{ github.ref_name }}
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/ding:latest
+            ```
+
+            Pulled from GitHub Container Registry:
+            ```bash
+            docker pull ghcr.io/${{ github.repository_owner }}/ding:${{ github.ref_name }}
+            ```
+
+            **Supported architectures:** `linux/amd64`, `linux/arm64`
+
+            ---
