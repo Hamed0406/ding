@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 // `Option<String>` means the field might be empty (we couldn't find it).
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ScanResult {
-    pub ip: String,           // e.g. "192.168.1.42"
-    pub mac: Option<String>,  // hardware address, e.g. "aa:bb:cc:dd:ee:ff" (None if unknown)
+    pub ip: String,               // e.g. "192.168.1.42"
+    pub mac: Option<String>,      // hardware address, e.g. "aa:bb:cc:dd:ee:ff" (None if unknown)
     pub hostname: Option<String>, // human-readable name (None — not yet implemented)
-    pub open_ports: Vec<u16>, // list of open TCP ports, e.g. [22, 80, 443]
-    pub alive: bool,          // true if the device responded to ARP or ICMP ping
+    pub open_ports: Vec<u16>,     // list of open TCP ports, e.g. [22, 80, 443]
+    pub alive: bool,              // true if the device responded to ARP or ICMP ping
 }
 
 impl ScanResult {

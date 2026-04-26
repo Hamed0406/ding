@@ -10,13 +10,10 @@
 // ============================================================
 
 use anyhow::Result;
-use pnet::packet::icmp::{
-    checksum, echo_request::MutableEchoRequestPacket, IcmpPacket, IcmpTypes,
-};
+use pnet::packet::icmp::{checksum, echo_request::MutableEchoRequestPacket, IcmpPacket, IcmpTypes};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::transport::{
-    icmp_packet_iter, transport_channel, TransportChannelType::Layer4,
-    TransportProtocol::Ipv4,
+    icmp_packet_iter, transport_channel, TransportChannelType::Layer4, TransportProtocol::Ipv4,
 };
 use std::net::IpAddr;
 use std::time::Duration;

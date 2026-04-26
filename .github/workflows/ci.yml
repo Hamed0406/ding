@@ -76,11 +76,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
+          # No `cache: npm` here: package-lock.json is not committed,
+          # and setup-node requires a lockfile to compute the cache key.
 
-      # Use install (not ci) — the Dockerfile uses install too because
-      # package-lock.json is not committed in some setups.
+      # Use install (not ci) — matches the Dockerfile, which uses install
+      # because package-lock.json is not committed.
       - run: npm install
       - run: npm run build
 
