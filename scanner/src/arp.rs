@@ -92,8 +92,9 @@ pub fn scan(iface_name: &str, hosts: &[Ipv4Addr], timeout_ms: u64) -> Result<Vec
                 }
             }
             // read_timeout fired — that's normal, just loop and check deadline
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut
-                || e.kind() == std::io::ErrorKind::WouldBlock =>
+            Err(e)
+                if e.kind() == std::io::ErrorKind::TimedOut
+                    || e.kind() == std::io::ErrorKind::WouldBlock =>
             {
                 continue
             }
@@ -133,20 +134,20 @@ fn send_arp_request(
         // so every device on the network receives it
         let mut eth = MutableEthernetPacket::new(&mut buf).unwrap();
         eth.set_destination(MacAddr::broadcast()); // send to everyone
-        eth.set_source(source_mac);                // from us
-        eth.set_ethertype(EtherTypes::Arp);        // payload type = ARP
+        eth.set_source(source_mac); // from us
+        eth.set_ethertype(EtherTypes::Arp); // payload type = ARP
 
         // Inner layer: the actual ARP request
         let mut arp = MutableArpPacket::new(eth.payload_mut()).unwrap();
         arp.set_hardware_type(ArpHardwareTypes::Ethernet); // we're on Ethernet
-        arp.set_protocol_type(EtherTypes::Ipv4);           // asking about IPv4
-        arp.set_hw_addr_len(6);                            // MAC = 6 bytes
-        arp.set_proto_addr_len(4);                         // IPv4 = 4 bytes
-        arp.set_operation(ArpOperations::Request);         // this is a question
-        arp.set_sender_hw_addr(source_mac);                // our MAC
-        arp.set_sender_proto_addr(source_ip);              // our IP
-        arp.set_target_hw_addr(MacAddr::zero());           // unknown (that's what we're asking)
-        arp.set_target_proto_addr(target_ip);              // the IP we're asking about
+        arp.set_protocol_type(EtherTypes::Ipv4); // asking about IPv4
+        arp.set_hw_addr_len(6); // MAC = 6 bytes
+        arp.set_proto_addr_len(4); // IPv4 = 4 bytes
+        arp.set_operation(ArpOperations::Request); // this is a question
+        arp.set_sender_hw_addr(source_mac); // our MAC
+        arp.set_sender_proto_addr(source_ip); // our IP
+        arp.set_target_hw_addr(MacAddr::zero()); // unknown (that's what we're asking)
+        arp.set_target_proto_addr(target_ip); // the IP we're asking about
     }
 
     // Send the raw bytes out on the wire

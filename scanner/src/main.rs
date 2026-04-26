@@ -86,9 +86,9 @@ fn subnet_hosts(cidr: &str) -> Result<Vec<Ipv4Addr>> {
     anyhow::ensure!(prefix <= 30, "prefix must be ≤ 30 (got {})", prefix);
 
     // Bit-math to find the first and last address in the subnet
-    let mask = !0u32 << (32 - prefix);      // e.g. /24 → 255.255.255.0
-    let network = u32::from(base) & mask;   // first address (e.g. 192.168.1.0)
-    let broadcast = network | !mask;        // last address  (e.g. 192.168.1.255)
+    let mask = !0u32 << (32 - prefix); // e.g. /24 → 255.255.255.0
+    let network = u32::from(base) & mask; // first address (e.g. 192.168.1.0)
+    let broadcast = network | !mask; // last address  (e.g. 192.168.1.255)
 
     // Return every address between the network address and broadcast (exclusive)
     Ok((network + 1..broadcast).map(Ipv4Addr::from).collect())
