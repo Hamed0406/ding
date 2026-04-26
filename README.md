@@ -1,6 +1,6 @@
 # Ding
 
-A fast network scanner that answers: who is on your network, what are they, and what ports are open. Inspired by [Fing](https://www.fing.com/).
+A fast network scanner that answers: who is on your network, what are they, and what ports are open.
 
 **Architecture:** Rust handles low-level scanning (ARP, ICMP, TCP). Go handles orchestration, change detection, alerting, storage, and serves the web UI. Docker ships everything — no host dependencies required.
 
