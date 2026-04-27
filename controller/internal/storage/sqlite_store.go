@@ -286,6 +286,49 @@ func scanDeviceRows(rows *sql.Rows) ([]scanner.Result, error) {
 	return results, rows.Err()
 }
 
+// DeviceHistory returns the last n scan entries for ip, oldest first.
+func (s *SQLiteStore) DeviceHistory(ip string, n int) []DeviceHistoryEntry {
+	rows, err := s.db.Query(`
+		SELECT s.scanned_at, d.alive, d.open_ports
+		FROM devices d
+		JOIN scans s ON s.id = d.scan_id
+		WHERE d.ip = ?
+		ORDER BY s.id DESC
+		LIMIT ?
+	`, ip, n)
+	if err != nil {
+		return []DeviceHistoryEntry{}
+	}
+	defer rows.Close()
+
+	var entries []DeviceHistoryEntry
+	for rows.Next() {
+		var e DeviceHistoryEntry
+		var scannedAtStr string
+		var alive int
+		var portsJSON string
+		if err := rows.Scan(&scannedAtStr, &alive, &portsJSON); err != nil {
+			continue
+		}
+		e.ScannedAt, _ = time.Parse(time.RFC3339, scannedAtStr)
+		e.Alive = alive != 0
+		if portsJSON == "" {
+			portsJSON = "[]"
+		}
+		_ = json.Unmarshal([]byte(portsJSON), &e.OpenPorts)
+		if e.OpenPorts == nil {
+			e.OpenPorts = []uint16{}
+		}
+		entries = append(entries, e)
+	}
+
+	// Reverse to oldest-first
+	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
+		entries[i], entries[j] = entries[j], entries[i]
+	}
+	return entries
+}
+
 func (s *SQLiteStore) SetLabel(ip, name string) error {
 	_, err := s.db.Exec(`
 		INSERT INTO device_labels (ip, name, updated_at) VALUES (?, ?, ?)

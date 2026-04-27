@@ -7,6 +7,7 @@ interface Props {
   devices: Device[]
   newIPs: Set<string>
   onLabelChange: (ip: string, label: string | null) => void
+  onSelect: (ip: string) => void
 }
 
 function sortByIP(devices: Device[]): Device[] {
@@ -17,7 +18,7 @@ function sortByIP(devices: Device[]): Device[] {
   })
 }
 
-export function DeviceGrid({ devices, newIPs, onLabelChange }: Props) {
+export function DeviceGrid({ devices, newIPs, onLabelChange, onSelect }: Props) {
   if (devices.length === 0) {
     return (
       <p className="text-slate-500 text-sm text-center py-12">
@@ -34,6 +35,7 @@ export function DeviceGrid({ devices, newIPs, onLabelChange }: Props) {
           device={d}
           isNew={newIPs.has(d.ip)}
           onLabelChange={onLabelChange}
+          onSelect={() => onSelect(d.ip)}
         />
       ))}
     </div>

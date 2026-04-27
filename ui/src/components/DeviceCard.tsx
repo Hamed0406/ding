@@ -9,6 +9,7 @@ interface Props {
   device: Device
   isNew?: boolean
   onLabelChange: (ip: string, label: string | null) => void
+  onSelect: () => void
 }
 
 // Maps device category → [background, text] Tailwind classes.
@@ -53,7 +54,7 @@ function PencilIcon() {
   )
 }
 
-export function DeviceCard({ device, isNew, onLabelChange }: Props) {
+export function DeviceCard({ device, isNew, onLabelChange, onSelect }: Props) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(device.label ?? '')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -89,11 +90,12 @@ export function DeviceCard({ device, isNew, onLabelChange }: Props) {
 
   return (
     <div
+      onClick={() => { if (!editing) onSelect() }}
       className={[
-        'rounded-xl p-4 space-y-2 border transition-colors group',
+        'rounded-xl p-4 space-y-2 border transition-colors group cursor-pointer',
         isNew
-          ? 'bg-green-950/40 border-green-800/50'
-          : 'bg-slate-800 border-slate-700',
+          ? 'bg-green-950/40 border-green-800/50 hover:border-green-700'
+          : 'bg-slate-800 border-slate-700 hover:border-slate-600',
       ].join(' ')}
     >
       {/* Row 1: device type badge + alive dot */}
@@ -134,7 +136,7 @@ export function DeviceCard({ device, isNew, onLabelChange }: Props) {
             {device.label ?? device.ip}
           </span>
           <button
-            onClick={startEdit}
+            onClick={(e) => { e.stopPropagation(); startEdit() }}
             className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 text-slate-500 hover:text-slate-300"
             title="Set custom name"
           >

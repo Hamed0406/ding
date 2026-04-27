@@ -38,6 +38,13 @@ export interface HistoryEntry {
   results: Device[]   // all devices found at that time
 }
 
+// Per-scan entry returned by GET /api/devices/{ip}/history
+export interface DeviceHistoryEntry {
+  scanned_at: string   // ISO timestamp
+  alive: boolean
+  open_ports: number[]
+}
+
 // --- Topology types (returned by GET /api/topology) ---
 
 // One node in the network topology graph

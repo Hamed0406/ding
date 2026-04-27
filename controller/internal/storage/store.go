@@ -16,6 +16,13 @@ type Record struct {
 	Results   []scanner.Result `json:"results"`
 }
 
+// DeviceHistoryEntry is one row in the per-device scan history.
+type DeviceHistoryEntry struct {
+	ScannedAt time.Time `json:"scanned_at"`
+	Alive     bool      `json:"alive"`
+	OpenPorts []uint16  `json:"open_ports"`
+}
+
 // Store is the interface the rest of the application uses for persistence.
 // Swap the implementation (JSON file, SQLite, Postgres) without touching
 // any API handler or controller code — just satisfy this interface.
@@ -34,6 +41,8 @@ type Store interface {
 	// vanish from the UI just because they missed one scan cycle.
 	// User-assigned labels are included in each result's Label field.
 	AllDevices() []scanner.Result
+	// DeviceHistory returns the last n scan entries for the given IP, oldest first.
+	DeviceHistory(ip string, n int) []DeviceHistoryEntry
 
 	// SetLabel stores a user-defined name for the given IP address.
 	SetLabel(ip, name string) error
@@ -138,6 +147,28 @@ func (s *JSONStore) AllDevices() []scanner.Result {
 		out = append(out, r)
 	}
 	return out
+}
+
+// DeviceHistory returns the per-scan history for ip from the JSON record file.
+func (s *JSONStore) DeviceHistory(ip string, n int) []DeviceHistoryEntry {
+	records, _ := s.load()
+	var entries []DeviceHistoryEntry
+	for _, rec := range records {
+		for _, r := range rec.Results {
+			if r.IP == ip {
+				entries = append(entries, DeviceHistoryEntry{
+					ScannedAt: rec.ScannedAt,
+					Alive:     r.Alive,
+					OpenPorts: r.OpenPorts,
+				})
+				break
+			}
+		}
+	}
+	if len(entries) > n {
+		entries = entries[len(entries)-n:]
+	}
+	return entries
 }
 
 func (s *JSONStore) SetLabel(ip, name string) error {

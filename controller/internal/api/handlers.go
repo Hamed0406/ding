@@ -2,13 +2,14 @@
 // controller/internal/api/handlers.go — REST API endpoints
 //
 // Each function here handles one URL:
-//   GET    /api/status              → interface/subnet, last scan time
-//   GET    /api/devices             → all known devices (stable registry view)
-//   GET    /api/history             → last 20 scan records
-//   GET    /api/topology            → network graph (nodes + edges)
-//   POST   /api/scan                → trigger a new scan immediately
-//   PUT    /api/devices/{ip}/label  → set a custom name for a device
-//   DELETE /api/devices/{ip}/label  → remove a custom name
+//   GET    /api/status                    → interface/subnet, last scan time
+//   GET    /api/devices                   → all known devices (stable registry view)
+//   GET    /api/devices/{ip}/history      → per-device scan history (last 100 scans)
+//   GET    /api/history                   → last 20 scan records
+//   GET    /api/topology                  → network graph (nodes + edges)
+//   POST   /api/scan                      → trigger a new scan immediately
+//   PUT    /api/devices/{ip}/label        → set a custom name for a device
+//   DELETE /api/devices/{ip}/label        → remove a custom name
 // ============================================================
 
 package api
@@ -121,6 +122,17 @@ func (s *Server) handleDelLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDeviceHistory responds to GET /api/devices/{ip}/history
+// Returns the last 100 scan entries for the given IP, oldest first.
+func (s *Server) handleDeviceHistory(w http.ResponseWriter, r *http.Request) {
+	ip := r.PathValue("ip")
+	entries := s.store.DeviceHistory(ip, 100)
+	if entries == nil {
+		entries = []storage.DeviceHistoryEntry{}
+	}
+	writeJSON(w, http.StatusOK, entries)
 }
 
 // handleTopology responds to GET /api/topology

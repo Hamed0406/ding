@@ -5,7 +5,7 @@
 // Each function maps to one REST endpoint on the Go server.
 // ============================================================
 
-import type { Device, HistoryEntry, Status, TopologyGraph } from '../types'
+import type { Device, DeviceHistoryEntry, HistoryEntry, Status, TopologyGraph } from '../types'
 
 // Generic helper: fetch a URL and parse the response as JSON.
 // Throws an error if the HTTP status is not OK (e.g. 404, 500).
@@ -47,6 +47,10 @@ export async function setDeviceLabel(ip: string, name: string): Promise<void> {
   })
   if (!res.ok) throw new Error(`setDeviceLabel: HTTP ${res.status}`)
 }
+
+// GET /api/devices/{ip}/history — per-device scan history (last 100 entries, oldest first).
+export const fetchDeviceHistory = (ip: string) =>
+  get<DeviceHistoryEntry[]>(`/api/devices/${encodeURIComponent(ip)}/history`)
 
 // DELETE /api/devices/{ip}/label — remove a custom name from a device.
 export async function deleteDeviceLabel(ip: string): Promise<void> {

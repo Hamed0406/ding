@@ -2,10 +2,11 @@
 // ui/src/App.tsx — Root component (the whole application)
 //
 // This component owns all the important state:
-//   - devices   : the current list of discovered network devices
-//   - changes   : what changed since the last scan (NEW/GONE/PORTS)
-//   - status    : interface name, subnet, last scan time
-//   - scanning  : whether a scan is in progress right now
+//   - devices         : the current list of discovered network devices
+//   - changes         : what changed since the last scan (NEW/GONE/PORTS/BACK)
+//   - status          : interface name, subnet, last scan time
+//   - scanning        : whether a scan is in progress right now
+//   - selectedDeviceIP: when set, the full-page history view is shown instead of the grid
 //
 // On startup it fetches the latest data from the server.
 // While running it listens for real-time SSE events to keep
@@ -16,6 +17,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { deleteDeviceLabel, fetchDevices, fetchStatus, setDeviceLabel, triggerScan } from './api/client'
 import { ChangesFeed } from './components/ChangesFeed'
 import { DeviceGrid } from './components/DeviceGrid'
+import { DeviceHistory } from './components/DeviceHistory'
 import { ScanButton } from './components/ScanButton'
 import { StatusBar } from './components/StatusBar'
 import { TopologyMap } from './components/TopologyMap'
@@ -31,6 +33,7 @@ export default function App() {
   const [scanning, setScanning] = useState(false)           // true while a scan is running
   const [view, setView] = useState<'grid' | 'topology'>('grid') // current view mode
   const [scanCount, setScanCount] = useState(0)             // increments after each scan, triggers topology refresh
+  const [selectedDeviceIP, setSelectedDeviceIP] = useState<string | null>(null) // history view target
 
   // --- Initial data load ---
   // When the page first loads, fetch the current status and device list from the server.
@@ -88,6 +91,11 @@ export default function App() {
     // so the spinner is only shown when the server actually starts working
   }
 
+  // The device currently being viewed in the history page (null = grid/topology view).
+  const selectedDevice = selectedDeviceIP
+    ? devices.find((d) => d.ip === selectedDeviceIP) ?? null
+    : null
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
 
@@ -107,55 +115,71 @@ export default function App() {
       {/* ---- Main content ---- */}
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
 
-        {/* Scan button + device count + view toggle */}
-        <div className="flex items-center gap-4">
-          <ScanButton scanning={scanning} onScan={handleScan} />
-          <span className="text-slate-500 text-sm">
-            {devices.length > 0
-              ? (() => {
-                  const online = devices.filter((d) => d.alive).length
-                  const total = devices.length
-                  return online === total
-                    ? `${total} online`
-                    : `${online} online · ${total} total`
-                })()
-              : 'No scan data yet'}
-          </span>
-          {/* View toggle: Grid ↔ Topology */}
-          <div className="ml-auto flex rounded-lg bg-slate-800 border border-slate-700 p-0.5">
-            <button
-              onClick={() => setView('grid')}
-              className={[
-                'px-3 py-1 text-xs font-medium rounded-md transition-colors',
-                view === 'grid'
-                  ? 'bg-slate-700 text-slate-100'
-                  : 'text-slate-400 hover:text-slate-200',
-              ].join(' ')}
-            >
-              Grid
-            </button>
-            <button
-              onClick={() => setView('topology')}
-              className={[
-                'px-3 py-1 text-xs font-medium rounded-md transition-colors',
-                view === 'topology'
-                  ? 'bg-slate-700 text-slate-100'
-                  : 'text-slate-400 hover:text-slate-200',
-              ].join(' ')}
-            >
-              Topology
-            </button>
-          </div>
-        </div>
-
-        {/* Changes since last scan (hidden when empty) */}
-        <ChangesFeed changes={changes} />
-
-        {/* View: either device grid or topology map */}
-        {view === 'grid' ? (
-          <DeviceGrid devices={devices} newIPs={newIPs} onLabelChange={handleLabelChange} />
+        {selectedDevice ? (
+          /* ---- Full-page device history view ---- */
+          <DeviceHistory
+            device={selectedDevice}
+            onBack={() => setSelectedDeviceIP(null)}
+          />
         ) : (
-          <TopologyMap scanCount={scanCount} />
+          /* ---- Normal grid / topology view ---- */
+          <>
+            {/* Scan button + device count + view toggle */}
+            <div className="flex items-center gap-4">
+              <ScanButton scanning={scanning} onScan={handleScan} />
+              <span className="text-slate-500 text-sm">
+                {devices.length > 0
+                  ? (() => {
+                      const online = devices.filter((d) => d.alive).length
+                      const total = devices.length
+                      return online === total
+                        ? `${total} online`
+                        : `${online} online · ${total} total`
+                    })()
+                  : 'No scan data yet'}
+              </span>
+              {/* View toggle: Grid ↔ Topology */}
+              <div className="ml-auto flex rounded-lg bg-slate-800 border border-slate-700 p-0.5">
+                <button
+                  onClick={() => setView('grid')}
+                  className={[
+                    'px-3 py-1 text-xs font-medium rounded-md transition-colors',
+                    view === 'grid'
+                      ? 'bg-slate-700 text-slate-100'
+                      : 'text-slate-400 hover:text-slate-200',
+                  ].join(' ')}
+                >
+                  Grid
+                </button>
+                <button
+                  onClick={() => setView('topology')}
+                  className={[
+                    'px-3 py-1 text-xs font-medium rounded-md transition-colors',
+                    view === 'topology'
+                      ? 'bg-slate-700 text-slate-100'
+                      : 'text-slate-400 hover:text-slate-200',
+                  ].join(' ')}
+                >
+                  Topology
+                </button>
+              </div>
+            </div>
+
+            {/* Changes since last scan (hidden when empty) */}
+            <ChangesFeed changes={changes} />
+
+            {/* View: either device grid or topology map */}
+            {view === 'grid' ? (
+              <DeviceGrid
+                devices={devices}
+                newIPs={newIPs}
+                onLabelChange={handleLabelChange}
+                onSelect={setSelectedDeviceIP}
+              />
+            ) : (
+              <TopologyMap scanCount={scanCount} />
+            )}
+          </>
         )}
 
       </main>
