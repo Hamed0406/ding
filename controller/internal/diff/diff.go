@@ -1,3 +1,19 @@
+// ============================================================
+// controller/internal/diff/diff.go — Scan-to-scan change detection
+//
+// Compare takes two consecutive scan result slices and produces a
+// human-readable list of what changed:
+//
+//   NEW   — IP appears in current scan but has never been seen before
+//   BACK  — IP appears in current scan and was seen before, but not
+//            in the immediately prior scan (device returned)
+//   GONE  — IP was in the prior scan but is absent from current scan
+//   PORTS — Device is present in both scans but its open port set changed
+//
+// Change events are sorted by IP before being returned, so the order
+// is deterministic regardless of ARP reply timing.
+// ============================================================
+
 package diff
 
 import (

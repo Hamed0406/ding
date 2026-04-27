@@ -138,7 +138,7 @@ var vendorTypes = []struct {
 	{"vizio", "Smart TV"},
 	{"hisense", "Smart TV"},
 	{"tcl", "Smart TV"},
-	{"sony", "Smart TV"},
+	{"sony", "Smart TV"}, // Bravia TVs — "sony mobile" is matched above this
 
 	// ---- Printers ----
 	{"brother", "Printer"},
@@ -171,4 +171,16 @@ var vendorTypes = []struct {
 	{"axis communications", "IP Camera"},
 	{"hanwha", "IP Camera"},
 	{"reolink", "IP Camera"},
+	{"amcrest", "IP Camera"},
+	{"foscam", "IP Camera"},
+	{"uniview", "IP Camera"},
+	{"vivotek", "IP Camera"},
+	{"pelco", "IP Camera"},
+	{"avigilon", "IP Camera"},
+	{"bosch security", "IP Camera"},
+
+	// ---- Phones (less common vendors) ----
+	{"vivo mobile", "Phone"},
+	{"hmd global", "Phone"},  // Nokia phones
+	{"sony mobile", "Phone"}, // Xperia — must come before generic "sony"
 }

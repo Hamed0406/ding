@@ -14,7 +14,7 @@ pub struct ScanResult {
     pub open_ports: Vec<u16>,     // list of open TCP ports, e.g. [22, 80, 443]
     pub alive: bool,              // true if the device responded to ARP or ICMP ping
     pub gateway: Option<String>,  // default gateway IP, e.g. "192.168.1.1" (same for all hosts)
-    pub ttl: Option<u8>, // TTL from ICMP reply — infers hop count (64=direct, 63=1 hop, etc.)
+    pub ttl: Option<u8>, // TTL from ICMP reply — Go controller rounds this to infer OS (64→Linux/macOS/Android/iOS, 128→Windows)
 }
 
 // ArpEvent is emitted by the scanner in --mode listen (one JSON line per event).

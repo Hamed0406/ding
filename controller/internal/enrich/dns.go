@@ -1,9 +1,14 @@
-// Package enrich adds extra information to scan results that the
-// low-level Rust scanner does not collect itself.
+// Package enrich layers additional intelligence onto raw scan results.
+// The Rust scanner produces IP/MAC/port/TTL data; this package turns
+// that into human-readable context. Enrichers run in pipeline order:
 //
-// Right now this means reverse-DNS lookups: given an IP address like
-// 192.168.1.42, we ask the system resolver "what hostname goes with
-// this IP?" and store the answer (e.g. "printer.local") on the result.
+//  1. Hostnames  — reverse-DNS PTR lookup (16 workers, 300 ms each)
+//  2. Vendor     — MAC OUI → manufacturer name (vendor package, inline)
+//  3. Classify   — vendor + ports → device category (classify package, inline)
+//  4. BannerDeviceType — HTTP Server header + <title> fingerprinting
+//  5. RTSPDeviceType   — RTSP OPTIONS handshake on port 554
+//  6. ApplyMDNS  — overlay authoritative mDNS service-type categories
+//  7. AnnotateOS — TTL + hostname + device-type → OS family
 package enrich
 
 import (

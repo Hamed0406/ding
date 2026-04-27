@@ -91,6 +91,18 @@ func main() {
 		// Must run before ApplyMDNS so mDNS can override the guess.
 		classify.Annotate(results)
 
+		// Probe HTTP on port 80/8000/8080 for devices classify couldn't identify.
+		// Reads the Server header and <title> tag — catches cameras, routers,
+		// and NAS boxes that don't have a recognised vendor OUI.
+		// Runs with 8 workers and a short timeout so it adds minimal latency.
+		enrich.BannerDeviceType(results, 8, 800*time.Millisecond)
+
+		// Probe RTSP on port 554 for remaining unclassified devices.
+		// Sends OPTIONS * RTSP/1.0 and marks confirmed RTSP servers as "IP Camera".
+		// Belt-and-suspenders: classify already catches 554 open → IP Camera,
+		// but this catches cameras that need a protocol handshake to self-identify.
+		enrich.RTSPDeviceType(results, 8, 600*time.Millisecond)
+
 		// Override DeviceType with authoritative mDNS service data where available.
 		enrich.ApplyMDNS(results, mdnsEvents)
 
@@ -253,7 +265,7 @@ type config struct {
 // If DING_INTERFACE or DING_SUBNET are not set, it auto-detects them.
 func configFromEnv() (config, error) {
 	cfg := config{
-		ports:    envOr("DING_PORTS", "22,80,443,8080,8443"),
+		ports:    envOr("DING_PORTS", "22,80,443,554,8000,8080,8443"),
 		dataPath: envOr("DING_DATA_PATH", "/data/ding.db"),
 		httpAddr: envOr("DING_HTTP_ADDR", ":8081"),
 	}

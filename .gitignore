@@ -20,4 +20,5 @@ controller/internal/api/static/*
 !controller/internal/api/static/.gitkeep
 
 # Claude Code
+CLAUDE.md
 .claude/

@@ -13,7 +13,7 @@ scanner/                  Rust crate — standalone binary
   src/
     main.rs               CLI entry point (clap); three modes: scan, listen, mdns
     arp.rs                ARP discovery + passive ARP listener (AF_PACKET via pnet)
-    ping.rs               ICMP liveness check via pnet transport
+    ping.rs               ICMP liveness check + TTL capture (raw ICMP socket via socket2)
     tcp.rs                TCP port scan via std::net::TcpStream::connect_timeout
     mdns.rs               mDNS/Bonjour discovery — multicast PTR queries, DNS correlation
     gateway.rs            Default gateway detection for topology
@@ -28,6 +28,9 @@ controller/               Go module (github.com/ding/ding)
       sqlite_store.go     SQLiteStore — active backend (modernc.org/sqlite, pure Go, no CGO)
     enrich/
       dns.go              Reverse-DNS lookup — 16-worker pool, 300 ms per-host timeout
+      http.go             HTTP banner fingerprinting — Server header + <title> on port 80/8000/8080
+      rtsp.go             RTSP OPTIONS probe on port 554 — confirms IP cameras
+      os.go               OS inference — TTL rounding + hostname patterns + device type
       mdns.go             ApplyMDNS() — overlays mDNS service data onto scan results
     classify/classify.go  Device category from MAC vendor + open ports (50+ rules)
     vendor/vendor.go      MAC vendor lookup — embedded IEEE OUI database via go:embed
@@ -100,7 +103,7 @@ docker compose up        # requires Linux host; UI at http://localhost:8080
 |---|---|---|
 | `DING_INTERFACE` | _(auto)_ | Network interface for ARP/ICMP/mDNS |
 | `DING_SUBNET` | _(auto)_ | Subnet to scan |
-| `DING_PORTS` | `22,80,443,8080,8443` | TCP ports to probe |
+| `DING_PORTS` | `22,80,443,554,8000,8080,8443` | TCP ports to probe |
 | `DING_TIMEOUT_MS` | `500` | Per-host timeout for ARP/TCP (ms) |
 | `DING_DATA_PATH` | `/data/ding.db` | SQLite database path |
 | `DING_HTTP_ADDR` | `:8081` | Web server listen address |
@@ -130,16 +133,19 @@ main.go
   → TriggerScan() on startup, then on DING_SCAN_INTERVAL ticker
     ┌── scanner.Run()        # ARP+ICMP+TCP scan, parse JSON stdout     ─┐
     └── scanner.RunMDNS()    # mDNS PTR queries, 3 s window             ─┤ parallel
-    → enrich.Hostnames()     # reverse-DNS, 16 workers, 300 ms timeout  ←┘
-    → vendor.Annotate()      # MAC → manufacturer (embedded OUI DB)
-    → classify.Annotate()    # vendor + ports → device category (50+ rules)
-    → enrich.ApplyMDNS()     # mDNS service type → device category (authoritative)
-    → store.Latest()         # read previous scan from SQLite
-    → store.AllKnownIPs()    # all IPs ever seen (for NEW vs BACK detection)
-    → diff.Compare()         # produce []Change (NEW / GONE / PORTS / BACK)
-    → store.Save()           # write to SQLite (scans + devices tables)
-    → alert.Send()           # Telegram if token set
-    → broker.Publish()       # push SSE scan_result with store.AllDevices() registry
+    → enrich.Hostnames()        # reverse-DNS, 16 workers, 300 ms timeout  ←┘
+    → vendor.Annotate()         # MAC → manufacturer (embedded OUI DB)
+    → classify.Annotate()       # vendor + ports → device category (50+ rules)
+    → enrich.BannerDeviceType() # HTTP banner on port 80/8000/8080 (8 workers, 800 ms)
+    → enrich.RTSPDeviceType()   # RTSP OPTIONS on port 554 (8 workers, 600 ms)
+    → enrich.ApplyMDNS()        # mDNS service type → device category (authoritative)
+    → enrich.AnnotateOS()       # TTL + hostname + device type → OS family
+    → store.Latest()            # read previous scan from SQLite
+    → store.AllKnownIPs()       # all IPs ever seen (for NEW vs BACK detection)
+    → diff.Compare()            # produce []Change (NEW / GONE / PORTS / BACK)
+    → store.Save()              # write to SQLite (scans + devices tables)
+    → alert.Send()              # Telegram if token set
+    → broker.Publish()          # push SSE scan_result with store.AllDevices() registry
 ```
 
 ## REST API

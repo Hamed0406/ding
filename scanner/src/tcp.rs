@@ -5,12 +5,14 @@
 // to each port in our list. If the connection succeeds, the
 // port is open (some service is listening there).
 //
-// Common ports and what they mean:
+// Default ports probed (passed in from Go via --ports):
 //   22   — SSH (remote terminal access)
-//   80   — HTTP (web server, unencrypted)
-//   443  — HTTPS (web server, encrypted)
-//   8080 — Alternative HTTP (often used by apps)
-//   8443 — Alternative HTTPS
+//   80   — HTTP (web interface)
+//   443  — HTTPS (web interface, encrypted)
+//   554  — RTSP (IP camera video stream)
+//   8000 — HTTP alt (Hikvision camera management)
+//   8080 — HTTP alt (QNAP, proxy, NAS)
+//   8443 — HTTPS alt
 // ============================================================
 
 use anyhow::Result;

@@ -1,3 +1,12 @@
+// Package scanner is the Go side of the scanner bridge.
+//
+// It defines the shared data types (Result, ArpEvent, MdnsEvent) that
+// the Rust binary serialises as JSON on stdout and Go deserialises here,
+// and provides three runner functions:
+//
+//   Run()     — active scan (ARP + ICMP + TCP); returns []Result
+//   Listen()  — passive ARP listener; streams ArpEvent via a channel
+//   RunMDNS() — mDNS discovery; returns []MdnsEvent after timeout
 package scanner
 
 import (

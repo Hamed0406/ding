@@ -56,7 +56,7 @@ struct Args {
     subnet: Option<String>,
 
     /// Comma-separated TCP ports to scan (scan mode only)
-    #[arg(short, long, default_value = "22,80,443,8080,8443")]
+    #[arg(short, long, default_value = "22,80,443,554,8000,8080,8443")]
     ports: String,
 
     /// Per-host timeout in milliseconds (scan mode only)

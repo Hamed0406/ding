@@ -2,7 +2,7 @@
 
 A fast network scanner that answers: who is on your network, what are they, and what ports are open.
 
-**Architecture:** Rust handles low-level scanning (ARP, ICMP, TCP). Go handles orchestration, change detection, alerting, storage, and serves the web UI. Docker ships everything — no host dependencies required.
+**Architecture:** Rust handles low-level scanning (ARP, ICMP, TCP, mDNS). Go handles orchestration, enrichment, change detection, alerting, storage, and serves the web UI. Docker ships everything — no host dependencies required.
 
 ---
 
@@ -46,7 +46,7 @@ services:
       - ./data:/data
     environment:
       # Leave DING_INTERFACE / DING_SUBNET unset to auto-detect
-      DING_PORTS: "22,80,443,8080,8443"
+      DING_PORTS: "22,80,443,554,8000,8080,8443"
       DING_HTTP_ADDR: ":8081"
       DING_SCAN_INTERVAL: "60s"
       # Optional Telegram alerts:
@@ -95,12 +95,17 @@ The UI is a React PWA bundled into the Go binary. It works in any browser and is
 | Feature | Description |
 |---|---|
 | **Scan now** | Trigger an on-demand scan; results appear in real time via SSE |
-| **Device grid** | All discovered devices — IP, MAC, hostname, vendor, open ports, alive status |
-| **Hostnames** | Reverse-DNS lookup runs in parallel after every scan (best-effort, 300ms per host) |
+| **Device grid** | All discovered devices — IP, MAC, hostname, vendor, device type, OS, open ports, alive status |
+| **Device history** | Click any device card to open a full-page history view — dot timeline, uptime %, scan log with port-change markers |
+| **Device labelling** | Assign a custom name to any device ("Living Room TV") that persists across scans |
+| **Hostnames** | Reverse-DNS lookup runs in parallel after every scan (best-effort, 300 ms per host) |
 | **MAC vendor** | Manufacturer name looked up from the embedded IEEE OUI database (no account needed) |
-| **Port names** | Port numbers shown as service names — `SSH/22`, `HTTPS/443`, etc. |
+| **Device type** | Device category guessed from vendor + ports + HTTP banner + RTSP + mDNS (50+ rules) |
+| **OS detection** | OS family inferred from TTL, hostname patterns, and device type (Linux, Windows, macOS, iOS, Android) |
+| **Port names** | Port numbers shown as service names — `SSH/22`, `HTTPS/443`, `RTSP/554`, etc. |
 | **Topology map** | Interactive SVG star-topology map; switch between Grid and Topology views |
-| **Changes feed** | NEW / GONE / PORTS changes highlighted with colour coding |
+| **Changes feed** | NEW / GONE / BACK / PORTS changes highlighted with colour coding |
+| **Passive detection** | Devices that send ARP traffic appear in the UI instantly without waiting for a scheduled scan |
 | **Auto-detect** | Interface and subnet shown in the header |
 | **PWA** | Installable on Android home screen, works offline (cached shell) |
 
@@ -114,7 +119,7 @@ All options are set via environment variables.
 |---|---|---|
 | `DING_INTERFACE` | _(auto)_ | Network interface to scan on |
 | `DING_SUBNET` | _(auto)_ | Target subnet in CIDR notation |
-| `DING_PORTS` | `22,80,443,8080,8443` | TCP ports to probe on each host |
+| `DING_PORTS` | `22,80,443,554,8000,8080,8443` | TCP ports to probe on each host |
 | `DING_TIMEOUT_MS` | `500` | Per-host timeout in milliseconds |
 | `DING_DATA_PATH` | `/data/ding.db` | Where scan history is stored (SQLite database) |
 | `DING_HTTP_ADDR` | `:8081` | Address the web server listens on |
@@ -133,10 +138,13 @@ The Go server exposes a small API used by the UI. You can also call it directly.
 # Current status (interface, subnet, last scan time)
 curl http://localhost:8081/api/status
 
-# Latest device list (with hostnames, vendor, ports)
+# Latest device list (with hostnames, vendor, device type, OS, ports)
 curl http://localhost:8081/api/devices
 
-# Scan history (last 20 runs)
+# Per-device scan history (last 100 scans, oldest first)
+curl http://localhost:8081/api/devices/192.168.1.42/history
+
+# Scan history (last 20 full scan records)
 curl http://localhost:8081/api/history
 
 # Network topology graph (nodes + edges)
@@ -145,11 +153,19 @@ curl http://localhost:8081/api/topology
 # Trigger a scan (returns 202; results arrive via SSE)
 curl -X POST http://localhost:8081/api/scan
 
+# Set a custom name for a device
+curl -X PUT http://localhost:8081/api/devices/192.168.1.42/label \
+     -H 'Content-Type: application/json' \
+     -d '{"name":"Living Room TV"}'
+
+# Remove a custom name
+curl -X DELETE http://localhost:8081/api/devices/192.168.1.42/label
+
 # SSE stream (real-time events)
 curl -N http://localhost:8081/api/events
 ```
 
-SSE event types: `connected`, `scan_start`, `scan_result`, `scan_error`.
+SSE event types: `connected`, `scan_start`, `scan_result`, `scan_error`, `device_seen`.
 
 ---
 
@@ -170,7 +186,7 @@ DING_TELEGRAM_CHAT_ID: "987654321"
 
 ## Scan data
 
-Results are stored in `./data/ding.db` (SQLite, mounted into the container). The database uses a normalized schema — one row per device per scan — which enables future analytics queries. No external database service is needed; the SQLite engine is compiled into the binary.
+Results are stored in `./data/ding.db` (SQLite, mounted into the container). The database uses a normalized schema — one row per device per scan — which enables per-device history queries. No external database service is needed; the SQLite engine is compiled into the binary.
 
 If you are upgrading from an older version that used `ding.json`, update `DING_DATA_PATH` in your compose file and the old JSON file can be left in place or deleted — it will not be read.
 
@@ -186,17 +202,27 @@ Browser / Android PWA
 
 Go controller (ding)
   ├── serves HTTP on :8081
-  ├── spawns Rust scanner binary as subprocess
-  │     ├── ARP broadcast  → discovers IPs + MACs
-  │     ├── ICMP echo      → confirms liveness
-  │     └── TCP connect    → finds open ports
-  │     └── prints JSON to stdout
-  ├── reverse-DNS lookup   → fills in hostnames (16 workers, 300 ms per host)
-  ├── MAC vendor lookup    → IEEE OUI database embedded in binary (no network call)
-  ├── diffs results against last scan → NEW / GONE / PORTS
-  ├── saves results to /data/ding.db  (SQLite)
+  ├── spawns Rust scanner binary as subprocess ──────────────┐
+  │     ├── ARP broadcast  → discovers IPs + MACs           │ parallel
+  │     ├── ICMP echo      → confirms liveness + reads TTL  │ with
+  │     ├── TCP connect    → finds open ports               │ mDNS
+  │     └── prints JSON array to stdout                     │
+  ├── spawns Rust scanner in --mode mdns ────────────────────┘
+  │     └── PTR queries → device service types (3 s window)
+  ├── reverse-DNS lookup    → hostnames (16 workers, 300 ms per host)
+  ├── MAC vendor lookup     → IEEE OUI database embedded in binary
+  ├── device classify       → 50+ vendor + port rules → device category
+  ├── HTTP banner probe     → Server header + <title> on port 80/8000/8080
+  ├── RTSP probe            → OPTIONS handshake on port 554
+  ├── mDNS overlay          → authoritative service-type categories
+  ├── OS fingerprinting     → TTL + hostname patterns + device type → OS family
+  ├── diffs results         → NEW / BACK / GONE / PORTS changes
+  ├── saves to /data/ding.db (SQLite)
   ├── pushes scan events to all SSE clients
   └── sends Telegram alert (if configured)
+
+Passive ARP listener (always running)
+  └── watches ARP traffic → device_seen SSE events without waiting for scan
 ```
 
 ---
