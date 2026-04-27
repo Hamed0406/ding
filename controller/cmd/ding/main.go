@@ -94,6 +94,10 @@ func main() {
 		// Override DeviceType with authoritative mDNS service data where available.
 		enrich.ApplyMDNS(results, mdnsEvents)
 
+		// Infer OS from TTL (rounded to nearest standard initial value) and
+		// open port hints. Runs after classify so it can't clobber DeviceType.
+		enrich.AnnotateOS(results)
+
 		// Load what we found last time so we can compare
 		previous := store.Latest()
 

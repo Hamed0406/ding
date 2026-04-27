@@ -117,6 +117,7 @@ export function DeviceHistory({ device, onBack }: Props) {
         <span className="font-mono">{device.ip}</span>
         {device.mac      && <span className="font-mono">{device.mac}</span>}
         {device.vendor   && <span>{device.vendor}</span>}
+        {device.os       && <span className="text-slate-300 font-medium">{device.os}</span>}
         {device.hostname && <span className="font-mono">{device.hostname}</span>}
       </div>
 

@@ -13,7 +13,8 @@ export interface Device {
   hostname: string | null  // reverse-DNS name, e.g. "router.lan" — null if no PTR record
   vendor: string | null    // MAC manufacturer, e.g. "Apple, Inc." — null if OUI unknown
   device_type: string | null // inferred category, e.g. "Router", "Smart Device" — null if unknown
-  label: string | null     // user-assigned custom name — null if not set
+  os: string | null          // inferred OS from TTL + ports, e.g. "Linux", "Windows" — null if unknown
+  label: string | null       // user-assigned custom name — null if not set
   open_ports: number[]     // e.g. [22, 80, 443]
   alive: boolean           // true if device responded in the most recent scan
 }

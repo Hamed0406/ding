@@ -156,9 +156,13 @@ export function DeviceCard({ device, isNew, onLabelChange, onSelect }: Props) {
         {device.mac ?? '—'}
       </p>
 
-      {/* Vendor */}
-      {device.vendor && (
-        <p className="text-xs text-slate-500 truncate">{device.vendor}</p>
+      {/* Vendor + OS */}
+      {(device.vendor || device.os) && (
+        <p className="text-xs text-slate-500 truncate">
+          {device.vendor}
+          {device.vendor && device.os && <span className="text-slate-600"> · </span>}
+          {device.os && <span className="text-slate-400">{device.os}</span>}
+        </p>
       )}
 
       {/* Hostname */}
