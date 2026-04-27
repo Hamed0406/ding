@@ -1,4 +1,5 @@
-// Renders all discovered devices as a responsive grid of DeviceCards.
+// Renders all discovered devices as a responsive grid of DeviceCards, sorted by IP.
+// Passes onSelect down to each card so clicking one opens the full-page history view.
 
 import type { Device } from '../types'
 import { DeviceCard } from './DeviceCard'

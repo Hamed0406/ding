@@ -1,3 +1,15 @@
+// ============================================================
+// controller/internal/storage/store.go — Store interface + JSONStore
+//
+// Store is the single interface everything outside this package uses
+// for persistence. The active backend is SQLiteStore (sqlite_store.go).
+// JSONStore is kept as a zero-dependency fallback; swap it in main.go.
+//
+// Key types:
+//   Record             — one full scan (timestamp + all device results)
+//   DeviceHistoryEntry — one per-device row: timestamp, alive, open ports
+// ============================================================
+
 package storage
 
 import (
@@ -11,6 +23,7 @@ import (
 
 const maxRecords = 100
 
+// Record is one complete scan snapshot: when it ran and every device found.
 type Record struct {
 	ScannedAt time.Time        `json:"scanned_at"`
 	Results   []scanner.Result `json:"results"`

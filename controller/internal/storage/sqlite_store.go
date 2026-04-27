@@ -1,3 +1,15 @@
+// ============================================================
+// controller/internal/storage/sqlite_store.go — SQLite backend
+//
+// SQLiteStore is the active Store implementation. Schema:
+//   scans   — one row per scan run (id, scanned_at)
+//   devices — one row per device per scan (all fields + scan_id FK)
+//   device_labels — user-assigned names, keyed by IP (survives scan cycles)
+//
+// WAL mode is enabled so reads never block writes (important during scans).
+// MaxOpenConns=1 avoids "database is locked" since SQLite has one writer.
+// ============================================================
+
 package storage
 
 import (

@@ -2,11 +2,16 @@
 // ui/src/App.tsx — Root component (the whole application)
 //
 // This component owns all the important state:
-//   - devices         : the current list of discovered network devices
-//   - changes         : what changed since the last scan (NEW/GONE/PORTS/BACK)
-//   - status          : interface name, subnet, last scan time
-//   - scanning        : whether a scan is in progress right now
-//   - selectedDeviceIP: when set, the full-page history view is shown instead of the grid
+//   - devices          : the current list of discovered network devices
+//   - changes          : what changed since the last scan (NEW/GONE/PORTS/BACK)
+//   - status           : interface name, subnet, last scan time
+//   - scanning         : whether a scan is in progress right now
+//   - selectedDeviceIP : when set, DeviceHistory replaces the grid/topology view
+//
+// Views:
+//   Grid     — responsive card grid; click a card → DeviceHistory for that device
+//   Topology — SVG star-layout graph of the network
+//   History  — full-page view for one device (dot timeline + scan log)
 //
 // On startup it fetches the latest data from the server.
 // While running it listens for real-time SSE events to keep

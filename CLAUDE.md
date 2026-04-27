@@ -37,20 +37,21 @@ controller/               Go module (github.com/ding/ding)
     iface/detect.go       Auto-detects LAN interface and subnet
     api/
       server.go           HTTP server, go:embed, SPA fallback, TriggerScan()
-      handlers.go         REST handlers (status, devices, history, topology, scan, labels)
+      handlers.go         REST handlers (status, devices, device history, topology, scan, labels)
       sse.go              SSE broker — fans out scan events to all connected clients
       static/             Populated at Docker build time from ui/dist (do not commit built files)
 
 ui/                       React + TypeScript + Tailwind PWA
   src/
-    App.tsx               Root component — SSE state, device registry, label edits
+    App.tsx               Root component — SSE state, device registry, label edits, history navigation
     types.ts              TypeScript mirrors of Go JSON types
     api/client.ts         fetch wrappers for all REST endpoints
     hooks/useEvents.ts    SSE hook with exponential-backoff reconnect
     utils/ports.ts        Port number → service name lookup (SSH/22, HTTPS/443, etc.)
     components/
-      DeviceCard.tsx      Device card with type badge, inline label editor, port pills
+      DeviceCard.tsx      Clickable device card — type badge, inline label editor, port pills; click → history
       DeviceGrid.tsx      Responsive grid of DeviceCards sorted by IP
+      DeviceHistory.tsx   Full-page history view — dot timeline, stats, scan log with port-change markers
       ChangesFeed.tsx     Recent changes feed (NEW / GONE / PORTS / BACK)
       TopologyMap.tsx     SVG network topology map (star layout)
       ScanButton.tsx      Scan trigger button with spinner
@@ -147,7 +148,8 @@ main.go
 |---|---|---|
 | GET | `/api/status` | Interface, subnet, last scan time |
 | GET | `/api/devices` | All known devices (stable registry — alive reflects latest scan) |
-| GET | `/api/history` | Last 20 scan records |
+| GET | `/api/devices/{ip}/history` | Last 100 scans for one device (oldest first) — alive + ports per scan |
+| GET | `/api/history` | Last 20 full scan records |
 | GET | `/api/topology` | Network graph (nodes + edges) |
 | POST | `/api/scan` | Trigger a new scan (202 Accepted; results via SSE) |
 | PUT | `/api/devices/{ip}/label` | Set a custom name `{"name": "Living Room TV"}` |
@@ -163,4 +165,4 @@ main.go
 - **New API endpoint** → add handler in `api/handlers.go`, register route in `api/server.go`.
 - **New UI component** → add under `ui/src/components/`, wire into `App.tsx`.
 - **Scheduling / daemon mode** → already implemented; tune `DING_SCAN_INTERVAL`.
-- **New storage backend** (e.g. Postgres) → implement the `storage.Store` interface (7 methods: `Save`, `Latest`, `LatestRecord`, `History`, `AllKnownIPs`, `AllDevices`, `SetLabel`, `DeleteLabel`, `GetLabels`), then swap `storage.NewSQLite` for your constructor in `main.go`.
+- **New storage backend** (e.g. Postgres) → implement the `storage.Store` interface (10 methods: `Save`, `Latest`, `LatestRecord`, `History`, `AllKnownIPs`, `AllDevices`, `DeviceHistory`, `SetLabel`, `DeleteLabel`, `GetLabels`), then swap `storage.NewSQLite` for your constructor in `main.go`.

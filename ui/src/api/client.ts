@@ -2,7 +2,16 @@
 // ui/src/api/client.ts — Functions that talk to the Go server
 //
 // These are thin wrappers around the browser's `fetch` API.
-// Each function maps to one REST endpoint on the Go server.
+// Each function maps to one REST endpoint on the Go server:
+//
+//   fetchStatus()              GET /api/status
+//   fetchDevices()             GET /api/devices
+//   fetchDeviceHistory(ip)     GET /api/devices/{ip}/history
+//   fetchHistory()             GET /api/history
+//   fetchTopology()            GET /api/topology
+//   triggerScan()              POST /api/scan
+//   setDeviceLabel(ip, name)   PUT /api/devices/{ip}/label
+//   deleteDeviceLabel(ip)      DELETE /api/devices/{ip}/label
 // ============================================================
 
 import type { Device, DeviceHistoryEntry, HistoryEntry, Status, TopologyGraph } from '../types'
@@ -18,10 +27,14 @@ async function get<T>(path: string): Promise<T> {
 // GET /api/status — returns interface name, subnet, and last scan time
 export const fetchStatus = () => get<Status>('/api/status')
 
-// GET /api/devices — returns the device list from the most recent scan
+// GET /api/devices — returns the stable device registry (all known devices)
 export const fetchDevices = () => get<Device[]>('/api/devices')
 
-// GET /api/history — returns the last 20 scan records
+// GET /api/devices/{ip}/history — per-device scan history (last 100 entries, oldest first)
+export const fetchDeviceHistory = (ip: string) =>
+  get<DeviceHistoryEntry[]>(`/api/devices/${encodeURIComponent(ip)}/history`)
+
+// GET /api/history — returns the last 20 full scan records
 export const fetchHistory = () => get<HistoryEntry[]>('/api/history')
 
 // GET /api/topology — returns the network topology graph (nodes + edges)
@@ -47,10 +60,6 @@ export async function setDeviceLabel(ip: string, name: string): Promise<void> {
   })
   if (!res.ok) throw new Error(`setDeviceLabel: HTTP ${res.status}`)
 }
-
-// GET /api/devices/{ip}/history — per-device scan history (last 100 entries, oldest first).
-export const fetchDeviceHistory = (ip: string) =>
-  get<DeviceHistoryEntry[]>(`/api/devices/${encodeURIComponent(ip)}/history`)
 
 // DELETE /api/devices/{ip}/label — remove a custom name from a device.
 export async function deleteDeviceLabel(ip: string): Promise<void> {

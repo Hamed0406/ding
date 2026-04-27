@@ -1,5 +1,6 @@
 // One card in the device grid — shows everything we know about a single device.
-// Hover the card to reveal the edit button; click it to set a custom name.
+// Click anywhere on the card to open the full-page history view for that device.
+// Hover to reveal the pencil button; click it (or just the pencil) to set a custom name inline.
 
 import { useEffect, useRef, useState } from 'react'
 import type { Device } from '../types'
