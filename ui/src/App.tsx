@@ -61,6 +61,13 @@ export default function App() {
         // Something went wrong — hide the spinner and log the error
         setScanning(false)
         console.error('scan error:', event.error)
+      } else if (event.type === 'device_seen') {
+        // Passive ARP detection — device appeared between full scans.
+        // Add it to the changes feed; the next full scan will complete the picture.
+        setChanges((prev) => [
+          { kind: event.kind, ip: event.ip, desc: `passive ARP — mac=${event.mac}` },
+          ...prev.slice(0, 19),
+        ])
       }
       // 'connected' events are ignored — they just confirm the SSE stream is working
     }, []) // useCallback with [] means this function is created once and never recreated
@@ -97,7 +104,13 @@ export default function App() {
           <ScanButton scanning={scanning} onScan={handleScan} />
           <span className="text-slate-500 text-sm">
             {devices.length > 0
-              ? `${devices.length} device${devices.length !== 1 ? 's' : ''} found`
+              ? (() => {
+                  const online = devices.filter((d) => d.alive).length
+                  const total = devices.length
+                  return online === total
+                    ? `${total} online`
+                    : `${online} online · ${total} total`
+                })()
               : 'No scan data yet'}
           </span>
           {/* View toggle: Grid ↔ Topology */}

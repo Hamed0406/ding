@@ -13,6 +13,7 @@ const (
 	KindNew   ChangeKind = "NEW"
 	KindGone  ChangeKind = "GONE"
 	KindPorts ChangeKind = "PORTS"
+	KindBack  ChangeKind = "BACK" // device returned after being absent in the previous scan
 )
 
 type Change struct {
@@ -25,7 +26,11 @@ func (c Change) String() string {
 	return fmt.Sprintf("[%s] %s — %s", c.Kind, c.IP, c.Desc)
 }
 
-func Compare(previous, current []scanner.Result) []Change {
+// Compare produces a list of changes between two consecutive scans.
+// known is the set of all IPs ever recorded (from store.AllKnownIPs).
+// An IP absent from previous but present in current is NEW only if it has
+// never been seen before; otherwise it is BACK (returned after absence).
+func Compare(previous, current []scanner.Result, known map[string]bool) []Change {
 	prev := index(previous)
 	curr := index(current)
 	var changes []Change
@@ -44,8 +49,12 @@ func Compare(previous, current []scanner.Result) []Change {
 			if r.Vendor != nil {
 				vendorDesc = " vendor=" + *r.Vendor
 			}
+			kind := KindNew
+			if known[ip] {
+				kind = KindBack
+			}
 			changes = append(changes, Change{
-				Kind: KindNew,
+				Kind: kind,
 				IP:   ip,
 				Desc: fmt.Sprintf("mac=%s%s%s ports=%v", mac, host, vendorDesc, r.OpenPorts),
 			})

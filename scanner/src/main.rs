@@ -1,29 +1,40 @@
 // ============================================================
 // scanner/src/main.rs — Entry point for the Rust scanner binary
 //
-// This binary is called by the Go controller as a subprocess.
-// It scans the network using three techniques in order:
-//   1. ARP  — broadcasts "who has this IP?" to find devices
-//   2. ICMP — sends a ping to confirm each device is alive
-//   3. TCP  — tries to connect to specific ports on each device
+// Two operating modes selected by --mode:
 //
-// Results are printed as a JSON array to stdout.
+//   scan (default) — active scan: ARP sweep + ICMP + TCP port probe.
+//     Prints one JSON array to stdout and exits. Called by the Go
+//     controller on each scheduled scan interval.
+//
+//   listen — passive ARP monitor: opens AF_PACKET, watches all ARP
+//     traffic on the LAN, and emits one JSON line per event to stdout.
+//     Runs forever until the Go controller kills the process on shutdown.
+//
 // The Go controller reads that JSON and does the rest.
 // ============================================================
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::net::Ipv4Addr;
 
-// Bring in our other modules (one file per scan technique)
 mod arp;
 mod gateway;
 mod ping;
 mod tcp;
 mod types;
 
+#[derive(ValueEnum, Clone, PartialEq)]
+enum Mode {
+    /// Active ARP + ICMP + TCP scan (default)
+    Scan,
+    /// Passive ARP listener — streams events to stdout indefinitely
+    Listen,
+}
+
 // Command-line arguments — clap fills these in automatically from what Go passes.
-// Example: scanner --interface eth0 --subnet 192.168.1.0/24 --ports 22,80,443
+// Example (scan):   scanner --interface eth0 --subnet 192.168.1.0/24
+// Example (listen): scanner --interface eth0 --mode listen
 #[derive(Parser)]
 #[command(name = "scanner", about = "Ding low-level network scanner")]
 struct Args {
@@ -31,54 +42,73 @@ struct Args {
     #[arg(short, long)]
     interface: String,
 
-    /// Target subnet in CIDR notation (e.g. 192.168.1.0/24)
+    /// Target subnet in CIDR notation — required for scan mode (e.g. 192.168.1.0/24)
     #[arg(short, long)]
-    subnet: String,
+    subnet: Option<String>,
 
-    /// Comma-separated TCP ports to scan
+    /// Comma-separated TCP ports to scan (scan mode only)
     #[arg(short, long, default_value = "22,80,443,8080,8443")]
     ports: String,
 
-    /// Per-host timeout in milliseconds
+    /// Per-host timeout in milliseconds (scan mode only)
     #[arg(short, long, default_value = "500")]
     timeout_ms: u64,
+
+    /// Operating mode: scan (default) or listen (passive ARP monitor)
+    #[arg(long, value_enum, default_value = "scan")]
+    mode: Mode,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Convert the ports string "22,80,443" into a list of numbers [22, 80, 443]
-    let ports: Vec<u16> = args
-        .ports
-        .split(',')
-        .filter_map(|p| p.trim().parse().ok()) // skip anything that isn't a valid number
-        .collect();
+    match args.mode {
+        Mode::Listen => {
+            // Passive mode: watch ARP traffic and stream events forever.
+            // Go kills this process on shutdown via context cancellation.
+            arp::listen(&args.interface)?;
+        }
 
-    // Turn "192.168.1.0/24" into a list of every possible host IP in that range
-    let hosts = subnet_hosts(&args.subnet)?;
+        Mode::Scan => {
+            let subnet = args
+                .subnet
+                .ok_or_else(|| anyhow::anyhow!("--subnet is required for scan mode"))?;
 
-    // Step 1 — ARP scan: send a broadcast message asking each IP "are you there?"
-    // Only devices that reply are included in `results`.
-    let mut results = arp::scan(&args.interface, &hosts, args.timeout_ms)?;
+            // Convert the ports string "22,80,443" into a list of numbers [22, 80, 443]
+            let ports: Vec<u16> = args
+                .ports
+                .split(',')
+                .filter_map(|p| p.trim().parse().ok()) // skip anything that isn't a valid number
+                .collect();
 
-    // Step 2 — ICMP ping: double-check each found device is still alive
-    ping::check_alive(&mut results, args.timeout_ms)?;
+            // Turn "192.168.1.0/24" into a list of every possible host IP in that range
+            let hosts = subnet_hosts(&subnet)?;
 
-    // Step 3 — TCP port scan: try to connect to each port on each device
-    tcp::scan_ports(&mut results, &ports, args.timeout_ms)?;
+            // Step 1 — ARP scan: send a broadcast message asking each IP "are you there?"
+            // Only devices that reply are included in `results`.
+            let mut results = arp::scan(&args.interface, &hosts, args.timeout_ms)?;
 
-    // Step 4 — Gateway detection: find the default gateway for this interface
-    // and tag every result with it (topology uses this to build the graph)
-    let gw = gateway::detect(&args.interface)?;
-    if let Some(gw_ip) = gw {
-        let gw_str = gw_ip.to_string();
-        for r in results.iter_mut() {
-            r.gateway = Some(gw_str.clone());
+            // Step 2 — ICMP ping: double-check each found device is still alive
+            ping::check_alive(&mut results, args.timeout_ms)?;
+
+            // Step 3 — TCP port scan: try to connect to each port on each device
+            tcp::scan_ports(&mut results, &ports, args.timeout_ms)?;
+
+            // Step 4 — Gateway detection: find the default gateway for this interface
+            // and tag every result with it (topology uses this to build the graph)
+            let gw = gateway::detect(&args.interface)?;
+            if let Some(gw_ip) = gw {
+                let gw_str = gw_ip.to_string();
+                for r in results.iter_mut() {
+                    r.gateway = Some(gw_str.clone());
+                }
+            }
+
+            // Print the final results as a JSON array to stdout — Go reads this
+            println!("{}", serde_json::to_string(&results)?);
         }
     }
 
-    // Print the final results as JSON to stdout — Go reads this
-    println!("{}", serde_json::to_string(&results)?);
     Ok(())
 }
 

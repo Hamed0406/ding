@@ -18,9 +18,9 @@ export interface Device {
 
 // One change detected between scans (matches diff.Change in Go)
 export interface Change {
-  kind: 'NEW' | 'GONE' | 'PORTS' // what type of change it is
-  ip: string                      // which device changed
-  desc: string                    // human-readable description, e.g. "mac=aa:bb:... ports=[22]"
+  kind: 'NEW' | 'GONE' | 'PORTS' | 'BACK' // what type of change it is
+  ip: string                               // which device changed
+  desc: string                             // human-readable description, e.g. "mac=aa:bb:... ports=[22]"
 }
 
 // Data returned by GET /api/status
@@ -68,3 +68,4 @@ export type SseEvent =
   | { type: 'scan_start' }  // a scan just started running
   | { type: 'scan_result'; devices: Device[]; changes: Change[]; scanned_at: string } // scan finished
   | { type: 'scan_error'; error: string }  // scan failed
+  | { type: 'device_seen'; ip: string; mac: string; kind: 'NEW' | 'BACK' } // passive ARP detection

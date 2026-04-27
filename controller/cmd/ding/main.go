@@ -66,8 +66,12 @@ func main() {
 		// Load what we found last time so we can compare
 		previous := store.Latest()
 
-		// Figure out what changed: new devices, gone devices, port changes
-		changes := diff.Compare(previous, results)
+		// Collect all IPs ever seen — must happen before Save so that
+		// truly new devices aren't counted as known yet.
+		knownIPs := store.AllKnownIPs()
+
+		// Figure out what changed: new devices, gone devices, returning devices, port changes
+		changes := diff.Compare(previous, results, knownIPs)
 
 		// Save the new results to disk
 		if err := store.Save(results); err != nil {
@@ -110,6 +114,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Start passive ARP listener — watches ARP traffic and instantly notifies
+	// the UI when a device appears without waiting for the next scheduled scan.
+	// Restarts automatically if the process dies (e.g. temporary interface error).
+	go runPassiveListener(ctx, cfg.iface, store, broker)
+
 	go func() {
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("http: %v", err)
@@ -124,6 +133,73 @@ func main() {
 	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	httpSrv.Shutdown(shutCtx)
+}
+
+// runPassiveListener starts the scanner in passive ARP listen mode and pushes
+// device_seen SSE events when a device appears that isn't in the last scan.
+// It restarts the scanner process automatically if it exits unexpectedly.
+func runPassiveListener(ctx context.Context, iface string, store storage.Store, broker *api.Broker) {
+	const debounce = 2 * time.Minute
+	lastReported := make(map[string]time.Time)
+
+	for {
+		// Exit cleanly when the app shuts down
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		events, err := scanner.Listen(ctx, iface)
+		if err != nil {
+			log.Printf("passive ARP listener: %v — retrying in 5s", err)
+			select {
+			case <-time.After(5 * time.Second):
+			case <-ctx.Done():
+				return
+			}
+			continue
+		}
+
+		for event := range events {
+			// Debounce: don't re-report the same IP within the debounce window
+			if time.Since(lastReported[event.IP]) < debounce {
+				continue
+			}
+			// Skip devices already present in the most recent full scan —
+			// they are already tracked and the UI knows about them
+			if ipInLatestScan(store, event.IP) {
+				continue
+			}
+
+			lastReported[event.IP] = time.Now()
+
+			kind := diff.KindNew
+			if store.AllKnownIPs()[event.IP] {
+				kind = diff.KindBack
+			}
+
+			broker.Publish(api.DeviceSeenEvent(event.IP, event.MAC, kind))
+		}
+
+		// events channel closed — scanner process exited; retry after a pause
+		log.Printf("passive ARP listener exited — retrying in 5s")
+		select {
+		case <-time.After(5 * time.Second):
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// ipInLatestScan reports whether ip appears in the most recent full scan.
+func ipInLatestScan(store storage.Store, ip string) bool {
+	for _, r := range store.Latest() {
+		if r.IP == ip {
+			return true
+		}
+	}
+	return false
 }
 
 // config holds all runtime settings for the application.

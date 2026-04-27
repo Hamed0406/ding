@@ -95,8 +95,11 @@ The UI is a React PWA bundled into the Go binary. It works in any browser and is
 | Feature | Description |
 |---|---|
 | **Scan now** | Trigger an on-demand scan; results appear in real time via SSE |
-| **Device grid** | All discovered devices — IP, MAC, hostname, open ports, alive status |
+| **Device grid** | All discovered devices — IP, MAC, hostname, vendor, open ports, alive status |
 | **Hostnames** | Reverse-DNS lookup runs in parallel after every scan (best-effort, 300ms per host) |
+| **MAC vendor** | Manufacturer name looked up from the embedded IEEE OUI database (no account needed) |
+| **Port names** | Port numbers shown as service names — `SSH/22`, `HTTPS/443`, etc. |
+| **Topology map** | Interactive SVG star-topology map; switch between Grid and Topology views |
 | **Changes feed** | NEW / GONE / PORTS changes highlighted with colour coding |
 | **Auto-detect** | Interface and subnet shown in the header |
 | **PWA** | Installable on Android home screen, works offline (cached shell) |
@@ -113,7 +116,7 @@ All options are set via environment variables.
 | `DING_SUBNET` | _(auto)_ | Target subnet in CIDR notation |
 | `DING_PORTS` | `22,80,443,8080,8443` | TCP ports to probe on each host |
 | `DING_TIMEOUT_MS` | `500` | Per-host timeout in milliseconds |
-| `DING_DATA_PATH` | `/data/ding.json` | Where scan history is stored |
+| `DING_DATA_PATH` | `/data/ding.db` | Where scan history is stored (SQLite database) |
 | `DING_HTTP_ADDR` | `:8081` | Address the web server listens on |
 | `DING_SCAN_INTERVAL` | `60s` | Auto-scan interval (`""` = on-demand only) |
 | `DING_SCANNER_BIN` | `/usr/local/bin/scanner` | Path to Rust scanner binary |
@@ -130,11 +133,14 @@ The Go server exposes a small API used by the UI. You can also call it directly.
 # Current status (interface, subnet, last scan time)
 curl http://localhost:8081/api/status
 
-# Latest device list
+# Latest device list (with hostnames, vendor, ports)
 curl http://localhost:8081/api/devices
 
 # Scan history (last 20 runs)
 curl http://localhost:8081/api/history
+
+# Network topology graph (nodes + edges)
+curl http://localhost:8081/api/topology
 
 # Trigger a scan (returns 202; results arrive via SSE)
 curl -X POST http://localhost:8081/api/scan
@@ -164,7 +170,9 @@ DING_TELEGRAM_CHAT_ID: "987654321"
 
 ## Scan data
 
-Results are stored in `./data/ding.json` (mounted into the container). The file holds the last 100 scans in JSON format.
+Results are stored in `./data/ding.db` (SQLite, mounted into the container). The database uses a normalized schema — one row per device per scan — which enables future analytics queries. No external database service is needed; the SQLite engine is compiled into the binary.
+
+If you are upgrading from an older version that used `ding.json`, update `DING_DATA_PATH` in your compose file and the old JSON file can be left in place or deleted — it will not be read.
 
 ---
 
@@ -183,9 +191,10 @@ Go controller (ding)
   │     ├── ICMP echo      → confirms liveness
   │     └── TCP connect    → finds open ports
   │     └── prints JSON to stdout
-  ├── reverse-DNS lookup   → fills in hostnames (parallel, best-effort)
+  ├── reverse-DNS lookup   → fills in hostnames (16 workers, 300 ms per host)
+  ├── MAC vendor lookup    → IEEE OUI database embedded in binary (no network call)
   ├── diffs results against last scan → NEW / GONE / PORTS
-  ├── saves results to /data/ding.json
+  ├── saves results to /data/ding.db  (SQLite)
   ├── pushes scan events to all SSE clients
   └── sends Telegram alert (if configured)
 ```
@@ -218,7 +227,7 @@ Useful when iterating on a single component (UI hot-reload, Rust logging, Go deb
 | Toolchain | Version | Used for |
 |---|---|---|
 | Rust | 1.70+ (stable) | `scanner/` |
-| Go | 1.22+ | `controller/` |
+| Go | 1.25+ | `controller/` |
 | Node | 22+ (with npm) | `ui/` |
 
 You also need `sudo` (or `CAP_NET_RAW` + `CAP_NET_ADMIN`) to run the scanner — ARP and ICMP need raw sockets.

@@ -20,10 +20,11 @@ use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
 use pnet::packet::{MutablePacket, Packet};
 use pnet::util::MacAddr;
 use std::collections::HashMap;
+use std::io::{self, Write};
 use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
 
-use crate::types::ScanResult;
+use crate::types::{ArpEvent, ScanResult};
 
 // Scan the network for all active devices by sending ARP requests.
 // Returns only devices that replied — silent devices are excluded.
@@ -117,6 +118,81 @@ pub fn scan(iface_name: &str, hosts: &[Ipv4Addr], timeout_ms: u64) -> Result<Vec
         .collect();
 
     Ok(results)
+}
+
+// Passively listen for ARP traffic on the interface and stream events to stdout.
+// Each event is one JSON line: {"ip":"...","mac":"..."}.
+// Runs forever — the Go controller kills this process on shutdown.
+// Captures both ARP requests and replies, so devices are detected the moment
+// they send any ARP packet (on connect, DHCP renewal, or gateway ping).
+pub fn listen(iface_name: &str) -> Result<()> {
+    let interfaces = datalink::interfaces();
+    let iface = interfaces
+        .into_iter()
+        .find(|i| i.name == iface_name)
+        .ok_or_else(|| anyhow::anyhow!("interface {} not found", iface_name))?;
+
+    let source_mac = iface
+        .mac
+        .ok_or_else(|| anyhow::anyhow!("no MAC address on {}", iface_name))?;
+
+    // Short read timeout so the loop stays responsive without spinning at 100% CPU.
+    let config = Config {
+        read_timeout: Some(Duration::from_millis(100)),
+        ..Default::default()
+    };
+
+    let (_tx, mut rx) = match datalink::channel(&iface, config)? {
+        Ethernet(tx, rx) => (tx, rx),
+        _ => anyhow::bail!("unsupported channel type"),
+    };
+
+    let stdout = io::stdout();
+
+    loop {
+        match rx.next() {
+            Ok(frame) => {
+                if let Some(eth) = EthernetPacket::new(frame) {
+                    if eth.get_ethertype() != EtherTypes::Arp {
+                        continue;
+                    }
+                    if let Some(arp) = ArpPacket::new(eth.payload()) {
+                        let sender_mac = arp.get_sender_hw_addr();
+                        // Ignore our own interface, broadcast, and zero MACs
+                        if sender_mac == source_mac
+                            || sender_mac == MacAddr::broadcast()
+                            || sender_mac == MacAddr::zero()
+                        {
+                            continue;
+                        }
+                        let ip = arp.get_sender_proto_addr();
+                        // 0.0.0.0 = ARP probe during DHCP — skip, address not yet assigned
+                        if ip.is_unspecified() {
+                            continue;
+                        }
+                        let event = ArpEvent {
+                            ip: ip.to_string(),
+                            mac: sender_mac.to_string(),
+                        };
+                        if let Ok(json) = serde_json::to_string(&event) {
+                            let mut out = stdout.lock();
+                            let _ = writeln!(out, "{}", json);
+                            let _ = out.flush(); // flush immediately — Go reads line by line
+                        }
+                    }
+                }
+            }
+            // Read timeout — normal, just loop again
+            Err(e)
+                if e.kind() == io::ErrorKind::TimedOut
+                    || e.kind() == io::ErrorKind::WouldBlock =>
+            {
+                continue;
+            }
+            // Any other error — keep running (interface blip, etc.)
+            Err(_) => continue,
+        }
+    }
 }
 
 // Build and send a single ARP request packet asking "Who has `target_ip`?"

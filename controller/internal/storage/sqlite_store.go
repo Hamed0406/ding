@@ -164,6 +164,82 @@ func (s *SQLiteStore) History(n int) []Record {
 	return records
 }
 
+// AllKnownIPs returns every distinct IP address ever stored in the devices table.
+func (s *SQLiteStore) AllKnownIPs() map[string]bool {
+	rows, err := s.db.Query(`SELECT DISTINCT ip FROM devices`)
+	if err != nil {
+		return map[string]bool{}
+	}
+	defer rows.Close()
+	known := make(map[string]bool)
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err == nil {
+			known[ip] = true
+		}
+	}
+	return known
+}
+
+// AllDevices returns one entry per IP (latest data for each), with alive=true
+// only for devices that appeared in the most recent scan.
+func (s *SQLiteStore) AllDevices() []scanner.Result {
+	rows, err := s.db.Query(`
+		SELECT
+			d.ip, d.mac, d.hostname, d.vendor, d.open_ports,
+			CASE WHEN d.scan_id = (SELECT MAX(id) FROM scans) THEN d.alive ELSE 0 END,
+			d.gateway, d.ttl
+		FROM devices d
+		WHERE d.scan_id = (
+			SELECT MAX(d2.scan_id) FROM devices d2 WHERE d2.ip = d.ip
+		)
+		ORDER BY d.ip
+	`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var results []scanner.Result
+	for rows.Next() {
+		var r scanner.Result
+		var mac, hostname, vendor, gateway sql.NullString
+		var ttl sql.NullInt64
+		var portsJSON string
+		var alive int
+
+		if err := rows.Scan(&r.IP, &mac, &hostname, &vendor, &portsJSON, &alive, &gateway, &ttl); err != nil {
+			continue
+		}
+		if mac.Valid {
+			r.MAC = &mac.String
+		}
+		if hostname.Valid {
+			r.Hostname = &hostname.String
+		}
+		if vendor.Valid {
+			r.Vendor = &vendor.String
+		}
+		if gateway.Valid {
+			r.Gateway = &gateway.String
+		}
+		if ttl.Valid {
+			v := uint8(ttl.Int64)
+			r.TTL = &v
+		}
+		r.Alive = alive != 0
+		if portsJSON == "" {
+			portsJSON = "[]"
+		}
+		_ = json.Unmarshal([]byte(portsJSON), &r.OpenPorts)
+		if r.OpenPorts == nil {
+			r.OpenPorts = []uint16{}
+		}
+		results = append(results, r)
+	}
+	return results
+}
+
 func (s *SQLiteStore) queryDevices(scanID int64) ([]scanner.Result, error) {
 	rows, err := s.db.Query(`
 		SELECT ip, mac, hostname, vendor, open_ports, alive, gateway, ttl

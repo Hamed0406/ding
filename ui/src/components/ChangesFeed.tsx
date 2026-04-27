@@ -1,6 +1,7 @@
 // Shows what changed between the last two scans.
 // Each change is colour-coded:
-//   🟢 NEW   — a device joined the network
+//   🟢 NEW   — a device joined the network for the first time ever
+//   🔵 BACK  — a known device returned after being absent
 //   🔴 GONE  — a device left the network
 //   🟡 PORTS — a device's open ports changed
 
@@ -9,15 +10,17 @@ import type { Change } from '../types'
 // Tailwind classes for the left border + background of each change type
 const kindStyle: Record<string, string> = {
   NEW:   'border-green-500 bg-green-950/30',
+  BACK:  'border-blue-500  bg-blue-950/30',
   GONE:  'border-red-500   bg-red-950/30',
   PORTS: 'border-amber-500 bg-amber-950/30',
 }
 
-// Tailwind classes for the small badge label ("NEW", "GONE", "PORTS")
+// Tailwind classes for the small badge label ("NEW", "BACK", "GONE", "PORTS")
 const kindBadge: Record<string, string> = {
-  NEW:   'bg-green-800  text-green-300',
-  GONE:  'bg-red-800    text-red-300',
-  PORTS: 'bg-amber-800  text-amber-300',
+  NEW:   'bg-green-800 text-green-300',
+  BACK:  'bg-blue-800  text-blue-300',
+  GONE:  'bg-red-800   text-red-300',
+  PORTS: 'bg-amber-800 text-amber-300',
 }
 
 interface Props {

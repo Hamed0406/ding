@@ -2,10 +2,11 @@
 // controller/internal/api/handlers.go — REST API endpoints
 //
 // Each function here handles one URL:
-//   GET  /api/status  → what interface/subnet are we on, last scan time
-//   GET  /api/devices → list of devices from the most recent scan
-//   GET  /api/history → last 20 scan records
-//   POST /api/scan    → start a new scan right now
+//   GET  /api/status   → what interface/subnet are we on, last scan time
+//   GET  /api/devices  → list of devices from the most recent scan
+//   GET  /api/history  → last 20 scan records
+//   GET  /api/topology → network graph (nodes + edges) for the topology map
+//   POST /api/scan     → start a new scan right now
 // ============================================================
 
 package api
@@ -47,10 +48,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 }
 
 // handleDevices responds to GET /api/devices
-// Returns the list of all devices found in the most recent scan.
-// The UI uses this to render the device grid on first load.
+// Returns all devices ever seen, with the most recent data per device.
+// alive=true only for devices present in the latest scan — gives a stable
+// registry view so devices don't vanish after a single missed scan.
 func (s *Server) handleDevices(w http.ResponseWriter, _ *http.Request) {
-	devices := s.store.Latest()
+	devices := s.store.AllDevices()
 	if devices == nil {
 		devices = []scanner.Result{} // return an empty array, not null
 	}
@@ -84,10 +86,10 @@ func (s *Server) handleScan(w http.ResponseWriter, _ *http.Request) {
 }
 
 // handleTopology responds to GET /api/topology
-// Returns a graph of nodes and edges built from the latest scan results.
-// The UI uses this to render the network topology map.
+// Returns a graph of nodes and edges built from all known devices.
+// Devices not in the latest scan are shown as offline (alive=false).
 func (s *Server) handleTopology(w http.ResponseWriter, _ *http.Request) {
-	devices := s.store.Latest()
+	devices := s.store.AllDevices()
 	if devices == nil {
 		devices = []scanner.Result{}
 	}

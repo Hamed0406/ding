@@ -43,11 +43,14 @@ type Config struct {
 // sseEvent is the shape of every message we push to the browser.
 // `omitempty` means empty fields are left out of the JSON.
 type sseEvent struct {
-	Type      string           `json:"type"`                 // "scan_start", "scan_result", "scan_error"
+	Type      string           `json:"type"`                 // "scan_start", "scan_result", "scan_error", "device_seen"
 	Error     string           `json:"error,omitempty"`      // only set on scan_error
 	Devices   []scanner.Result `json:"devices,omitempty"`    // only set on scan_result
 	Changes   []diff.Change    `json:"changes,omitempty"`    // only set on scan_result
 	ScannedAt string           `json:"scanned_at,omitempty"` // only set on scan_result
+	IP        string           `json:"ip,omitempty"`         // only set on device_seen
+	MAC       string           `json:"mac,omitempty"`        // only set on device_seen
+	Kind      diff.ChangeKind  `json:"kind,omitempty"`       // only set on device_seen (NEW or BACK)
 }
 
 // Server is the main HTTP handler. It holds references to everything it needs.
@@ -58,6 +61,12 @@ type Server struct {
 	scanFn   ScanFunc       // the actual scan logic (defined in main.go)
 	scanning atomic.Bool    // prevents two scans from running at the same time
 	mux      *http.ServeMux // URL router
+}
+
+// DeviceSeenEvent builds an sseEvent for a passively detected device.
+// Called by the passive ARP listener goroutine in main.go.
+func DeviceSeenEvent(ip, mac string, kind diff.ChangeKind) sseEvent {
+	return sseEvent{Type: "device_seen", IP: ip, MAC: mac, Kind: kind}
 }
 
 // NewServer creates the server, registers all routes, and returns it.
@@ -105,17 +114,18 @@ func (s *Server) runScan() {
 	s.broker.Publish(sseEvent{Type: "scan_start"})
 
 	// Run the full scan cycle (ARP + ICMP + TCP, save, diff, alert)
-	devices, changes, err := s.scanFn()
+	_, changes, err := s.scanFn()
 	if err != nil {
 		// Something went wrong — tell the browsers
 		s.broker.Publish(sseEvent{Type: "scan_error", Error: err.Error()})
 		return
 	}
 
-	// Success — push the full results to every open browser tab
+	// Push the full registry (not just this scan's results) so the UI
+	// always shows every known device, with alive=false for offline ones.
 	s.broker.Publish(sseEvent{
 		Type:      "scan_result",
-		Devices:   devices,
+		Devices:   s.store.AllDevices(),
 		Changes:   changes,
 		ScannedAt: time.Now().UTC().Format(time.RFC3339),
 	})

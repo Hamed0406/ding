@@ -21,23 +21,29 @@ controller/               Go module (github.com/ding/ding)
   cmd/ding/main.go        Binary entry point — config, HTTP server, scan loop
   internal/
     scanner/runner.go     Spawns Rust binary, captures stdout, unmarshals JSON
-    storage/store.go      JSON-file persistence (no CGO, no external deps)
+    storage/
+      store.go            Store interface + JSONStore (JSON-file fallback, kept for reference)
+      sqlite_store.go     SQLiteStore — active backend (modernc.org/sqlite, pure Go, no CGO)
+    enrich/dns.go         Reverse-DNS lookup — 16-worker pool, 300 ms per-host timeout
+    vendor/vendor.go      MAC vendor lookup — embedded IEEE OUI database via go:embed
+    topology/topology.go  Builds node+edge graph from scan results (star topology)
     diff/diff.go          Compares []Result slices → []Change (NEW / GONE / PORTS)
     alert/alert.go        Telegram HTTP alert (add more channels here)
     iface/detect.go       Auto-detects LAN interface and subnet
     api/
       server.go           HTTP server, go:embed, SPA fallback, TriggerScan()
-      handlers.go         REST handlers (/api/status, /api/devices, /api/history, /api/scan)
+      handlers.go         REST handlers (/api/status, /api/devices, /api/history, /api/topology, /api/scan)
       sse.go              SSE broker — fans out scan events to all connected clients
       static/             Populated at Docker build time from ui/dist (do not commit built files)
 
 ui/                       React + TypeScript + Tailwind PWA
   src/
-    App.tsx               Top-level component, SSE state management
+    App.tsx               Top-level component, SSE state management, Grid/Topology toggle
     types.ts              TypeScript mirrors of Go JSON types
     api/client.ts         fetch wrappers for all API endpoints
     hooks/useEvents.ts    SSE hook with exponential-backoff reconnect
-    components/           DeviceCard, DeviceGrid, ChangesFeed, ScanButton, StatusBar
+    utils/ports.ts        Port number → service name lookup (SSH/22, HTTPS/443, etc.)
+    components/           DeviceCard, DeviceGrid, ChangesFeed, ScanButton, StatusBar, TopologyMap
 ```
 
 ## Commands
@@ -82,7 +88,7 @@ docker compose up        # requires Linux host; UI at http://localhost:8080
 | `DING_SUBNET` | _(auto)_ | Subnet to scan |
 | `DING_PORTS` | `22,80,443,8080,8443` | TCP ports to probe |
 | `DING_TIMEOUT_MS` | `500` | Per-host timeout (ms) |
-| `DING_DATA_PATH` | `/data/ding.json` | Scan history file |
+| `DING_DATA_PATH` | `/data/ding.db` | SQLite database path |
 | `DING_HTTP_ADDR` | `:8081` | Web server listen address |
 | `DING_SCAN_INTERVAL` | `60s` | Auto-scan interval (`""` = on-demand only) |
 | `DING_SCANNER_BIN` | `/usr/local/bin/scanner` | Override Rust binary path |
@@ -94,10 +100,12 @@ docker compose up        # requires Linux host; UI at http://localhost:8080
 - **Linux only** — `arp.rs` uses `AF_PACKET` raw sockets.
 - **CAP_NET_RAW required** — for ARP and ICMP. In Docker: `cap_add: [NET_RAW, NET_ADMIN]` + `network_mode: host`.
 - **pnet uses AF_PACKET, not libpcap** — no libpcap needed at build or runtime.
-- **No CGO in Go** — storage uses plain JSON files.
+- **No CGO in Go** — SQLite via `modernc.org/sqlite` (pure Go, compiles the SQLite engine in). No `gcc`, no system libs.
+- **Go 1.25+ required** — `modernc.org/sqlite v1.50+` sets this minimum in `go.mod`.
 - **Scanner speaks JSON on stdout, errors on stderr** — never mix them.
 - **go:embed requires static/ to be non-empty at compile time** — `static/.gitkeep` satisfies this locally; the Dockerfile overwrites it with the real UI build.
 - **Docker-only deployment** — 4-stage Dockerfile: Node (UI) → Rust (scanner) → Go (controller) → debian:bookworm-slim runtime.
+- **Store is an interface** — `storage.Store` in `store.go`. `SQLiteStore` is the active backend. `JSONStore` is kept but unused. Swap backends by changing one line in `main.go`.
 
 ## Data flow
 
@@ -105,12 +113,14 @@ docker compose up        # requires Linux host; UI at http://localhost:8080
 main.go
   → starts HTTP server (api.NewServer)
   → TriggerScan() on startup, then on DING_SCAN_INTERVAL ticker
-    → scanner.Run()       # exec Rust binary, parse JSON stdout
-    → store.Latest()      # read previous scan
-    → diff.Compare()      # produce []Change
-    → store.Save()        # append to ding.json
-    → alert.Send()        # Telegram if token set
-    → broker.Publish()    # push SSE events to all connected clients
+    → scanner.Run()           # exec Rust binary, parse JSON stdout
+    → enrich.Hostnames()      # reverse-DNS, 16 workers, 300 ms timeout
+    → vendor.Annotate()       # MAC → manufacturer (embedded OUI DB)
+    → store.Latest()          # read previous scan from SQLite
+    → diff.Compare()          # produce []Change
+    → store.Save()            # write to SQLite (scans + devices tables)
+    → alert.Send()            # Telegram if token set
+    → broker.Publish()        # push SSE events to all connected clients
 ```
 
 ## Adding features
@@ -120,3 +130,4 @@ main.go
 - **New API endpoint** → add handler in `api/handlers.go`, register route in `api/server.go`.
 - **New UI page** → add component under `ui/src/components/`, wire into `App.tsx`.
 - **Scheduling / daemon mode** → already implemented; tune `DING_SCAN_INTERVAL`.
+- **New storage backend** (e.g. Postgres) → implement the `storage.Store` interface (4 methods: `Save`, `Latest`, `LatestRecord`, `History`), then swap `storage.NewSQLite` for your constructor in `main.go`.

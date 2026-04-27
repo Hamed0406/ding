@@ -156,3 +156,46 @@ func TestSQLiteStore_MultipleScans_LatestIsNewest(t *testing.T) {
 		t.Errorf("Latest() should return newest scan; got %v", latest)
 	}
 }
+
+func TestSQLiteStore_AllDevices_StableRegistry(t *testing.T) {
+	s := newTestStore(t)
+
+	// Scan 1: two devices
+	if err := s.Save([]scanner.Result{
+		{IP: "192.168.1.1", Alive: true, OpenPorts: []uint16{22}},
+		{IP: "192.168.1.2", Alive: true, OpenPorts: []uint16{80}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Scan 2: only one device (192.168.1.2 is "gone")
+	if err := s.Save([]scanner.Result{
+		{IP: "192.168.1.1", Alive: true, OpenPorts: []uint16{22}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	all := s.AllDevices()
+	if len(all) != 2 {
+		t.Fatalf("AllDevices() want 2 (registry), got %d", len(all))
+	}
+
+	byIP := make(map[string]scanner.Result)
+	for _, r := range all {
+		byIP[r.IP] = r
+	}
+
+	if !byIP["192.168.1.1"].Alive {
+		t.Error("192.168.1.1 should be alive (in latest scan)")
+	}
+	if byIP["192.168.1.2"].Alive {
+		t.Error("192.168.1.2 should be offline (not in latest scan)")
+	}
+}
+
+func TestSQLiteStore_AllDevices_Empty(t *testing.T) {
+	s := newTestStore(t)
+	if all := s.AllDevices(); all != nil {
+		t.Errorf("AllDevices() on empty store should return nil, got %v", all)
+	}
+}

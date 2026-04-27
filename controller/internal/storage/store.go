@@ -24,9 +24,20 @@ type Store interface {
 	Latest() []scanner.Result
 	LatestRecord() *Record
 	History(n int) []Record
+	// AllKnownIPs returns every IP address ever recorded across all scans.
+	// Used by the diff engine to distinguish truly new devices from ones
+	// that are returning after a temporary absence.
+	AllKnownIPs() map[string]bool
+	// AllDevices returns one entry per IP ever seen, with the most recent
+	// data for each device. alive is true only if the device appeared in
+	// the latest scan. This gives a stable registry view — devices don't
+	// vanish from the UI just because they missed one scan cycle.
+	AllDevices() []scanner.Result
 }
 
-// JSONStore is the default Store implementation: a single JSON file on disk.
+// JSONStore is the legacy Store implementation: a single JSON file on disk.
+// It is no longer the active backend (SQLiteStore is). Kept as a simple
+// fallback — swap it back in main.go if you need a zero-dependency option.
 type JSONStore struct {
 	path string
 }
@@ -78,6 +89,44 @@ func (s *JSONStore) History(n int) []Record {
 		return records
 	}
 	return records[len(records)-n:]
+}
+
+// AllKnownIPs returns every IP ever seen across all stored scan records.
+func (s *JSONStore) AllKnownIPs() map[string]bool {
+	records, _ := s.load()
+	known := make(map[string]bool)
+	for _, rec := range records {
+		for _, r := range rec.Results {
+			known[r.IP] = true
+		}
+	}
+	return known
+}
+
+// AllDevices returns one entry per IP (latest data), alive only if in the most recent scan.
+func (s *JSONStore) AllDevices() []scanner.Result {
+	records, _ := s.load()
+	if len(records) == 0 {
+		return nil
+	}
+	// Build set of IPs in the latest scan
+	latestIPs := make(map[string]bool, len(records[len(records)-1].Results))
+	for _, r := range records[len(records)-1].Results {
+		latestIPs[r.IP] = true
+	}
+	// Keep the most recent data per IP
+	latest := make(map[string]scanner.Result)
+	for _, rec := range records {
+		for _, r := range rec.Results {
+			latest[r.IP] = r
+		}
+	}
+	out := make([]scanner.Result, 0, len(latest))
+	for _, r := range latest {
+		r.Alive = latestIPs[r.IP]
+		out = append(out, r)
+	}
+	return out
 }
 
 func (s *JSONStore) load() ([]Record, error) {
