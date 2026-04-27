@@ -1,7 +1,7 @@
 // ============================================================
 // scanner/src/main.rs — Entry point for the Rust scanner binary
 //
-// Two operating modes selected by --mode:
+// Three operating modes selected by --mode:
 //
 //   scan (default) — active scan: ARP sweep + ICMP + TCP port probe.
 //     Prints one JSON array to stdout and exits. Called by the Go
@@ -10,6 +10,11 @@
 //   listen — passive ARP monitor: opens AF_PACKET, watches all ARP
 //     traffic on the LAN, and emits one JSON line per event to stdout.
 //     Runs forever until the Go controller kills the process on shutdown.
+//
+//   mdns — mDNS/Bonjour discovery: joins the 224.0.0.251:5353
+//     multicast group, sends PTR queries for common service types,
+//     and emits one JSON line per resolved service. Exits after
+//     --timeout-ms milliseconds.
 //
 // The Go controller reads that JSON and does the rest.
 // ============================================================
@@ -20,6 +25,7 @@ use std::net::Ipv4Addr;
 
 mod arp;
 mod gateway;
+mod mdns;
 mod ping;
 mod tcp;
 mod types;
@@ -30,11 +36,14 @@ enum Mode {
     Scan,
     /// Passive ARP listener — streams events to stdout indefinitely
     Listen,
+    /// mDNS/Bonjour discovery — queries service types, emits JSON lines, exits after --timeout-ms
+    Mdns,
 }
 
 // Command-line arguments — clap fills these in automatically from what Go passes.
 // Example (scan):   scanner --interface eth0 --subnet 192.168.1.0/24
 // Example (listen): scanner --interface eth0 --mode listen
+// Example (mdns):   scanner --interface eth0 --mode mdns --timeout-ms 3000
 #[derive(Parser)]
 #[command(name = "scanner", about = "Ding low-level network scanner")]
 struct Args {
@@ -54,7 +63,7 @@ struct Args {
     #[arg(short, long, default_value = "500")]
     timeout_ms: u64,
 
-    /// Operating mode: scan (default) or listen (passive ARP monitor)
+    /// Operating mode: scan (default), listen (passive ARP), or mdns (Bonjour discovery)
     #[arg(long, value_enum, default_value = "scan")]
     mode: Mode,
 }
@@ -67,6 +76,12 @@ fn main() -> Result<()> {
             // Passive mode: watch ARP traffic and stream events forever.
             // Go kills this process on shutdown via context cancellation.
             arp::listen(&args.interface)?;
+        }
+
+        Mode::Mdns => {
+            // mDNS discovery: send PTR queries, collect responses, emit JSON lines.
+            // Exits after --timeout-ms (default 500 ms — pass a higher value from Go).
+            mdns::scan(&args.interface, args.timeout_ms)?;
         }
 
         Mode::Scan => {

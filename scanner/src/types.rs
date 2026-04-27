@@ -26,6 +26,16 @@ pub struct ArpEvent {
     pub mac: String, // sender MAC from the ARP packet
 }
 
+// MdnsEvent is emitted by --mode mdns, one JSON line per resolved service.
+// It pairs an IP address with the mDNS service type the device advertises and
+// the friendly instance name the device chose for itself.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MdnsEvent {
+    pub ip: String,      // e.g. "192.168.1.5"
+    pub service: String, // e.g. "_googlecast._tcp"
+    pub name: String,    // e.g. "Bedroom TV"
+}
+
 impl ScanResult {
     // Create a blank result for an IP — fields get filled in by arp, ping, and tcp modules.
     pub fn new(ip: String) -> Self {

@@ -25,7 +25,7 @@ import type { Change, Device, Status } from './types'
 export default function App() {
   // --- State ---
   const [devices, setDevices] = useState<Device[]>([])      // all found devices
-  const [changes, setChanges] = useState<Change[]>([])      // what changed in the last scan
+  const [changes, setChanges] = useState<Change[]>([])      // what changed in the last scan (NEW/GONE/PORTS/BACK)
   const [newIPs, setNewIPs] = useState<Set<string>>(new Set()) // IPs that are brand new (for the green badge)
   const [status, setStatus] = useState<Status | null>(null) // header info (interface, subnet, time)
   const [scanning, setScanning] = useState(false)           // true while a scan is running

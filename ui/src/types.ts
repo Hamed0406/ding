@@ -8,14 +8,14 @@
 
 // One device found on the network (matches scanner.Result in Go)
 export interface Device {
-  ip: string           // e.g. "192.168.1.42"
-  mac: string | null   // e.g. "aa:bb:cc:dd:ee:ff" — null if unknown
-  hostname: string | null // reverse-DNS name, e.g. "router.lan" — null if no PTR record
-  vendor: string | null      // MAC vendor, e.g. "Apple, Inc." — null if OUI not in IEEE database
-  device_type: string | null // guessed category, e.g. "Router", "Smart Device" — null if unknown
-  label: string | null       // user-assigned name, e.g. "Living Room Router" — null if not set
-  open_ports: number[]       // e.g. [22, 80, 443]
-  alive: boolean       // true if device responded to ping
+  ip: string             // e.g. "192.168.1.42"
+  mac: string | null     // e.g. "aa:bb:cc:dd:ee:ff" — null if unknown
+  hostname: string | null  // reverse-DNS name, e.g. "router.lan" — null if no PTR record
+  vendor: string | null    // MAC manufacturer, e.g. "Apple, Inc." — null if OUI unknown
+  device_type: string | null // inferred category, e.g. "Router", "Smart Device" — null if unknown
+  label: string | null     // user-assigned custom name — null if not set
+  open_ports: number[]     // e.g. [22, 80, 443]
+  alive: boolean           // true if device responded in the most recent scan
 }
 
 // One change detected between scans (matches diff.Change in Go)

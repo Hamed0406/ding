@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -50,10 +51,32 @@ func main() {
 	//   Run Rust scanner → compare to last scan → save → send alerts
 	// Both the timer and the "Scan Now" button call this same function.
 	scanFn := func() ([]scanner.Result, []diff.Change, error) {
-		// Call the Rust binary and get back a list of devices
-		results, err := scanner.Run(cfg.iface, cfg.subnet, cfg.ports, cfg.timeoutMs)
-		if err != nil {
-			return nil, nil, err
+		// Run the ARP/ICMP/TCP scan and the mDNS discovery in parallel.
+		// mDNS listens for 3 s — same order as the active scan — so both
+		// finish at roughly the same time with no added latency.
+		var (
+			results    []scanner.Result
+			mdnsEvents []scanner.MdnsEvent
+			scanErr    error
+		)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			results, scanErr = scanner.Run(cfg.iface, cfg.subnet, cfg.ports, cfg.timeoutMs)
+		}()
+		go func() {
+			defer wg.Done()
+			var err error
+			mdnsEvents, err = scanner.RunMDNS(cfg.iface, 3000)
+			if err != nil {
+				log.Printf("mDNS scan: %v (continuing without mDNS data)", err)
+			}
+		}()
+		wg.Wait()
+
+		if scanErr != nil {
+			return nil, nil, scanErr
 		}
 
 		// Resolve hostnames via reverse DNS (best-effort, runs in parallel).
@@ -64,9 +87,12 @@ func main() {
 		// Pure in-memory lookup against the embedded IEEE OUI database.
 		vendor.Annotate(results)
 
-		// Guess device category (Router, Smart Device, Printer, …) from
-		// vendor name and open ports. Must run after vendor.Annotate.
+		// Guess device category from vendor name and open ports.
+		// Must run before ApplyMDNS so mDNS can override the guess.
 		classify.Annotate(results)
+
+		// Override DeviceType with authoritative mDNS service data where available.
+		enrich.ApplyMDNS(results, mdnsEvents)
 
 		// Load what we found last time so we can compare
 		previous := store.Latest()
@@ -213,7 +239,7 @@ type config struct {
 	subnet       string        // CIDR range to scan, e.g. "192.168.1.0/24"
 	ports        string        // comma-separated ports, e.g. "22,80,443"
 	timeoutMs    int           // how long to wait per host (milliseconds)
-	dataPath     string        // where to save scan history JSON file
+	dataPath     string        // path to the SQLite database file
 	httpAddr     string        // address for the web server, e.g. ":8081"
 	scanInterval time.Duration // how often to auto-scan (0 = on-demand only)
 	alert        alert.Config  // Telegram credentials

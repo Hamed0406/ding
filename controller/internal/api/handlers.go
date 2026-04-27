@@ -2,11 +2,13 @@
 // controller/internal/api/handlers.go — REST API endpoints
 //
 // Each function here handles one URL:
-//   GET  /api/status   → what interface/subnet are we on, last scan time
-//   GET  /api/devices  → list of devices from the most recent scan
-//   GET  /api/history  → last 20 scan records
-//   GET  /api/topology → network graph (nodes + edges) for the topology map
-//   POST /api/scan     → start a new scan right now
+//   GET    /api/status              → interface/subnet, last scan time
+//   GET    /api/devices             → all known devices (stable registry view)
+//   GET    /api/history             → last 20 scan records
+//   GET    /api/topology            → network graph (nodes + edges)
+//   POST   /api/scan                → trigger a new scan immediately
+//   PUT    /api/devices/{ip}/label  → set a custom name for a device
+//   DELETE /api/devices/{ip}/label  → remove a custom name
 // ============================================================
 
 package api

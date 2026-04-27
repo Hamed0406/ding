@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
+	"time"
 )
 
 type Result struct {
@@ -27,6 +29,14 @@ type Result struct {
 type ArpEvent struct {
 	IP  string `json:"ip"`
 	MAC string `json:"mac"`
+}
+
+// MdnsEvent is emitted by the scanner in --mode mdns, one JSON line per resolved
+// service. It pairs an IP with the mDNS service type and the device's chosen name.
+type MdnsEvent struct {
+	IP      string `json:"ip"`
+	Service string `json:"service"` // e.g. "_googlecast._tcp"
+	Name    string `json:"name"`    // e.g. "Bedroom TV"
 }
 
 // Run invokes the Rust scanner binary in scan mode and returns parsed results.
@@ -91,6 +101,46 @@ func Listen(ctx context.Context, iface string) (<-chan ArpEvent, error) {
 		}
 	}()
 
+	return events, nil
+}
+
+// RunMDNS runs the scanner in --mode mdns for timeoutMs milliseconds.
+// It sends PTR queries for common service types, collects responses, and
+// returns the resolved events. Errors are non-fatal — callers should log
+// them and continue without mDNS data rather than aborting the scan.
+func RunMDNS(iface string, timeoutMs int) ([]MdnsEvent, error) {
+	// Give the process a generous extra budget beyond the mDNS timeout.
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		time.Duration(timeoutMs+3000)*time.Millisecond,
+	)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, scannerBin(),
+		"--interface", iface,
+		"--mode", "mdns",
+		"--timeout-ms", fmt.Sprintf("%d", timeoutMs),
+	)
+
+	out, err := cmd.Output()
+	if err != nil && ctx.Err() == nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("mdns scanner exited %d: %s", ee.ExitCode(), ee.Stderr)
+		}
+		return nil, fmt.Errorf("mdns scanner: %w", err)
+	}
+
+	var events []MdnsEvent
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var ev MdnsEvent
+		if err := json.Unmarshal([]byte(line), &ev); err == nil && ev.IP != "" {
+			events = append(events, ev)
+		}
+	}
 	return events, nil
 }
 
