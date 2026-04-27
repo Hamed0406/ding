@@ -30,6 +30,7 @@ export default function App() {
   const [status, setStatus] = useState<Status | null>(null) // header info (interface, subnet, time)
   const [scanning, setScanning] = useState(false)           // true while a scan is running
   const [view, setView] = useState<'grid' | 'topology'>('grid') // current view mode
+  const [scanCount, setScanCount] = useState(0)             // increments after each scan, triggers topology refresh
 
   // --- Initial data load ---
   // When the page first loads, fetch the current status and device list from the server.
@@ -54,6 +55,8 @@ export default function App() {
         setNewIPs(new Set(event.changes.filter((c) => c.kind === 'NEW').map((c) => c.ip)))
         // Update the "last scan" time in the header
         setStatus((s) => (s ? { ...s, last_scan: event.scanned_at } : s))
+        // Bump counter so TopologyMap re-fetches the latest graph
+        setScanCount((n) => n + 1)
       } else if (event.type === 'scan_error') {
         // Something went wrong — hide the spinner and log the error
         setScanning(false)
@@ -131,7 +134,7 @@ export default function App() {
         {view === 'grid' ? (
           <DeviceGrid devices={devices} newIPs={newIPs} />
         ) : (
-          <TopologyMap />
+          <TopologyMap scanCount={scanCount} />
         )}
 
       </main>

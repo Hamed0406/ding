@@ -37,7 +37,11 @@ interface PositionedNode extends TopologyNode {
   r: number
 }
 
-export function TopologyMap() {
+interface Props {
+  scanCount: number // increments after each scan; triggers a re-fetch
+}
+
+export function TopologyMap({ scanCount }: Props) {
   const [graph, setGraph] = useState<TopologyGraph | null>(null)
   const [hoveredNode, setHoveredNode] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -46,7 +50,7 @@ export function TopologyMap() {
     fetchTopology()
       .then(setGraph)
       .catch((e) => setError(e.message))
-  }, [])
+  }, [scanCount])
 
   if (error) {
     return (

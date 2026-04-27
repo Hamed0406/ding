@@ -61,7 +61,7 @@ func Build(results []scanner.Result) Graph {
 			ID:    gatewayIP,
 			Label: gatewayIP,
 			Type:  NodeGateway,
-			Alive: true,
+			Alive: false, // overridden below if the gateway appeared in scan results
 		}
 		// Check if the gateway itself was scanned (it often is)
 		for _, r := range results {
