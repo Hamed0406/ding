@@ -16,18 +16,30 @@ type Record struct {
 	Results   []scanner.Result `json:"results"`
 }
 
-type Store struct {
+// Store is the interface the rest of the application uses for persistence.
+// Swap the implementation (JSON file, SQLite, Postgres) without touching
+// any API handler or controller code — just satisfy this interface.
+type Store interface {
+	Save(results []scanner.Result) error
+	Latest() []scanner.Result
+	LatestRecord() *Record
+	History(n int) []Record
+}
+
+// JSONStore is the default Store implementation: a single JSON file on disk.
+type JSONStore struct {
 	path string
 }
 
-func New(path string) (*Store, error) {
+// New creates a JSONStore backed by the given file path.
+func New(path string) (*JSONStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	return &Store{path: path}, nil
+	return &JSONStore{path: path}, nil
 }
 
-func (s *Store) Save(results []scanner.Result) error {
+func (s *JSONStore) Save(results []scanner.Result) error {
 	records, _ := s.load()
 	records = append(records, Record{ScannedAt: time.Now().UTC(), Results: results})
 	if len(records) > maxRecords {
@@ -41,7 +53,7 @@ func (s *Store) Save(results []scanner.Result) error {
 }
 
 // Latest returns results from the most recent scan, or nil if none exists.
-func (s *Store) Latest() []scanner.Result {
+func (s *JSONStore) Latest() []scanner.Result {
 	r := s.LatestRecord()
 	if r == nil {
 		return nil
@@ -50,7 +62,7 @@ func (s *Store) Latest() []scanner.Result {
 }
 
 // LatestRecord returns the full most recent scan record, or nil if none exists.
-func (s *Store) LatestRecord() *Record {
+func (s *JSONStore) LatestRecord() *Record {
 	records, err := s.load()
 	if err != nil || len(records) == 0 {
 		return nil
@@ -60,7 +72,7 @@ func (s *Store) LatestRecord() *Record {
 }
 
 // History returns the last n scan records (oldest first).
-func (s *Store) History(n int) []Record {
+func (s *JSONStore) History(n int) []Record {
 	records, _ := s.load()
 	if len(records) <= n {
 		return records
@@ -68,7 +80,7 @@ func (s *Store) History(n int) []Record {
 	return records[len(records)-n:]
 }
 
-func (s *Store) load() ([]Record, error) {
+func (s *JSONStore) load() ([]Record, error) {
 	data, err := os.ReadFile(s.path)
 	if os.IsNotExist(err) {
 		return nil, nil

@@ -25,7 +25,7 @@ import (
 
 // Broker manages a list of connected browser clients and delivers events to all of them.
 type Broker struct {
-	mu      sync.RWMutex            // protects `clients` from concurrent access
+	mu      sync.RWMutex             // protects `clients` from concurrent access
 	clients map[chan []byte]struct{} // one channel per connected browser tab
 }
 
@@ -46,7 +46,7 @@ func (b *Broker) Publish(v any) {
 	for ch := range b.clients {
 		select {
 		case ch <- data: // deliver the message
-		default:         // tab is too slow — skip it rather than block everything
+		default: // tab is too slow — skip it rather than block everything
 		}
 	}
 }

@@ -10,11 +10,11 @@ import (
 var knownOUIs = []struct {
 	mac, want string
 }{
-	{"3C:22:FB:00:00:00", "Apple"},                // common Apple prefix
-	{"B8:27:EB:11:22:33", "Raspberry Pi"},         // original Raspberry Pi Foundation
-	{"DC:A6:32:aa:bb:cc", "Raspberry Pi"},         // newer Pi prefix, lowercase
-	{"00-50-56-AB-CD-EF", "VMware"},               // VMware (dash format)
-	{"00:1B:63:00:00:00", "Apple"},                // Apple, alternate prefix
+	{"3C:22:FB:00:00:00", "Apple"},        // common Apple prefix
+	{"B8:27:EB:11:22:33", "Raspberry Pi"}, // original Raspberry Pi Foundation
+	{"DC:A6:32:aa:bb:cc", "Raspberry Pi"}, // newer Pi prefix, lowercase
+	{"00-50-56-AB-CD-EF", "VMware"},       // VMware (dash format)
+	{"00:1B:63:00:00:00", "Apple"},        // Apple, alternate prefix
 }
 
 func TestLookup_KnownVendors(t *testing.T) {
@@ -35,10 +35,10 @@ func TestLookup_UnknownPrefix(t *testing.T) {
 
 func TestLookup_Malformed(t *testing.T) {
 	cases := []string{
-		"",                        // empty
-		"not-a-mac",               // garbage
-		"GG:HH:II:JJ:KK:LL",       // non-hex
-		"12:34",                   // too short
+		"",                  // empty
+		"not-a-mac",         // garbage
+		"GG:HH:II:JJ:KK:LL", // non-hex
+		"12:34",             // too short
 	}
 	for _, mac := range cases {
 		if got := Lookup(mac); got != "" {

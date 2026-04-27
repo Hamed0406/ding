@@ -18,7 +18,7 @@ RUN cargo build --release
 # Stage 3 — Build Go controller
 # The ui/dist output is copied into internal/api/static/ before go build
 # so that go:embed can bundle it into the binary.
-FROM golang:1.24-bookworm AS controller-build
+FROM golang:1.25-bookworm AS controller-build
 WORKDIR /build/controller
 COPY controller/go.mod controller/go.sum* ./
 RUN go mod download

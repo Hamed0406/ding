@@ -39,8 +39,8 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	// Open (or create) the JSON file where we save scan history
-	store, err := storage.New(cfg.dataPath)
+	// Open (or create) the SQLite database where we save scan history
+	store, err := storage.NewSQLite(cfg.dataPath)
 	if err != nil {
 		log.Fatalf("storage: %v", err)
 	}
@@ -143,7 +143,7 @@ type config struct {
 func configFromEnv() (config, error) {
 	cfg := config{
 		ports:    envOr("DING_PORTS", "22,80,443,8080,8443"),
-		dataPath: envOr("DING_DATA_PATH", "/data/ding.json"),
+		dataPath: envOr("DING_DATA_PATH", "/data/ding.db"),
 		httpAddr: envOr("DING_HTTP_ADDR", ":8081"),
 	}
 

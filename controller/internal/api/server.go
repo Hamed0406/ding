@@ -52,8 +52,8 @@ type sseEvent struct {
 
 // Server is the main HTTP handler. It holds references to everything it needs.
 type Server struct {
-	cfg      Config        // interface and subnet (shown in UI header)
-	store    *storage.Store // scan history (read & write)
+	cfg      Config         // interface and subnet (shown in UI header)
+	store    storage.Store  // scan history (read & write)
 	broker   *Broker        // delivers events to browser tabs
 	scanFn   ScanFunc       // the actual scan logic (defined in main.go)
 	scanning atomic.Bool    // prevents two scans from running at the same time
@@ -61,17 +61,17 @@ type Server struct {
 }
 
 // NewServer creates the server, registers all routes, and returns it.
-func NewServer(cfg Config, store *storage.Store, broker *Broker, scanFn ScanFunc) *Server {
+func NewServer(cfg Config, store storage.Store, broker *Broker, scanFn ScanFunc) *Server {
 	s := &Server{cfg: cfg, store: store, broker: broker, scanFn: scanFn}
 	s.mux = http.NewServeMux()
 
 	// API routes — these return JSON data
-	s.mux.HandleFunc("GET /api/status", s.handleStatus)       // interface, subnet, last scan time
-	s.mux.HandleFunc("GET /api/devices", s.handleDevices)     // current device list
-	s.mux.HandleFunc("GET /api/history", s.handleHistory)     // last 20 scan records
-	s.mux.HandleFunc("GET /api/topology", s.handleTopology)   // network topology graph
-	s.mux.HandleFunc("POST /api/scan", s.handleScan)          // trigger a new scan
-	s.mux.HandleFunc("GET /api/events", s.broker.serveSSE)    // SSE stream
+	s.mux.HandleFunc("GET /api/status", s.handleStatus)     // interface, subnet, last scan time
+	s.mux.HandleFunc("GET /api/devices", s.handleDevices)   // current device list
+	s.mux.HandleFunc("GET /api/history", s.handleHistory)   // last 20 scan records
+	s.mux.HandleFunc("GET /api/topology", s.handleTopology) // network topology graph
+	s.mux.HandleFunc("POST /api/scan", s.handleScan)        // trigger a new scan
+	s.mux.HandleFunc("GET /api/events", s.broker.serveSSE)  // SSE stream
 
 	// Everything else (/, /assets/..., etc.) serves the React app
 	sub, _ := fs.Sub(staticFiles, "static") // strip the "static/" prefix

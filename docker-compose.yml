@@ -14,7 +14,7 @@ services:
       # DING_SUBNET: 192.168.1.0/24
       DING_PORTS: "22,80,443,8080,8443"
       DING_TIMEOUT_MS: "500"
-      DING_DATA_PATH: /data/ding.json
+      DING_DATA_PATH: /data/ding.db
       DING_HTTP_ADDR: ":8081"
       # Scan automatically every 60 s (leave empty for on-demand only)
       DING_SCAN_INTERVAL: "60s"

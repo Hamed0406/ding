@@ -79,7 +79,7 @@ func (s *Server) handleScan(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "scan already in progress"})
 		return
 	}
-	go s.runScan()              // start scan in the background
+	go s.runScan()                     // start scan in the background
 	w.WriteHeader(http.StatusAccepted) // 202 = "got it, working on it"
 }
 

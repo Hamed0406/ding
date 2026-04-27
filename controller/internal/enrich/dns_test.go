@@ -68,8 +68,8 @@ func TestHostnamesWith_EmptyResultLeavesNil(t *testing.T) {
 func TestHostnamesWith_SkipsDeadAndPrefilled(t *testing.T) {
 	preset := "already.local"
 	results := []scanner.Result{
-		{IP: "10.0.0.7", Alive: false},                      // dead → skip
-		{IP: "10.0.0.8", Alive: true, Hostname: &preset},    // already named → skip
+		{IP: "10.0.0.7", Alive: false},                   // dead → skip
+		{IP: "10.0.0.8", Alive: true, Hostname: &preset}, // already named → skip
 	}
 
 	calls := 0
