@@ -1,6 +1,7 @@
 // One card in the device grid — shows everything we know about a single device.
 
 import type { Device } from '../types'
+import { portLabel } from '../utils/ports'
 
 interface Props {
   device: Device
@@ -55,8 +56,9 @@ export function DeviceCard({ device, isNew }: Props) {
             <span
               key={p}
               className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-700 text-cyan-300"
+              title={String(p)}
             >
-              {p}
+              {portLabel(p)}
             </span>
           ))}
         </div>

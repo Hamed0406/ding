@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react'
 import { fetchTopology } from '../api/client'
 import type { TopologyGraph, TopologyNode } from '../types'
+import { portName } from '../utils/ports'
 
 // Layout constants
 const WIDTH = 900
@@ -23,13 +24,6 @@ const CENTER_Y = HEIGHT / 2
 const RADIUS = Math.min(WIDTH, HEIGHT) * 0.35 // orbit radius for device nodes
 const GATEWAY_R = 30  // gateway node radius
 const DEVICE_R = 18   // device node radius
-
-// Port label lookup for common services
-const PORT_LABELS: Record<number, string> = {
-  22: 'SSH', 53: 'DNS', 80: 'HTTP', 443: 'HTTPS',
-  8080: 'HTTP-Alt', 8443: 'HTTPS-Alt', 3306: 'MySQL',
-  5432: 'Postgres', 6379: 'Redis', 3000: 'Dev',
-}
 
 interface PositionedNode extends TopologyNode {
   x: number
@@ -165,7 +159,7 @@ export function TopologyMap({ scanCount }: Props) {
                 fill="#67e8f9"
                 className="pointer-events-none"
               >
-                {node.open_ports.slice(0, 5).map(p => PORT_LABELS[p] || p).join(' · ')}
+                {node.open_ports.slice(0, 5).map(portName).join(' · ')}
               </text>
             )}
           </g>
@@ -219,7 +213,7 @@ function TooltipPanel({ node }: { node: PositionedNode }) {
       </text>
       {node.open_ports && node.open_ports.length > 0 && (
         <text x={10} y={88} fontSize={10} fill="#67e8f9" fontFamily="monospace">
-          Ports: {node.open_ports.slice(0, 6).map(p => PORT_LABELS[p] || p).join(', ')}
+          Ports: {node.open_ports.slice(0, 6).map(portName).join(', ')}
         </text>
       )}
     </g>
