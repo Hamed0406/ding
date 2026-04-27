@@ -32,7 +32,15 @@ type Store interface {
 	// data for each device. alive is true only if the device appeared in
 	// the latest scan. This gives a stable registry view — devices don't
 	// vanish from the UI just because they missed one scan cycle.
+	// User-assigned labels are included in each result's Label field.
 	AllDevices() []scanner.Result
+
+	// SetLabel stores a user-defined name for the given IP address.
+	SetLabel(ip, name string) error
+	// DeleteLabel removes any user-defined name for the given IP address.
+	DeleteLabel(ip string) error
+	// GetLabels returns all stored ip→name mappings.
+	GetLabels() map[string]string
 }
 
 // JSONStore is the legacy Store implementation: a single JSON file on disk.
@@ -104,29 +112,66 @@ func (s *JSONStore) AllKnownIPs() map[string]bool {
 }
 
 // AllDevices returns one entry per IP (latest data), alive only if in the most recent scan.
+// User-assigned labels are overlaid from the labels file.
 func (s *JSONStore) AllDevices() []scanner.Result {
 	records, _ := s.load()
 	if len(records) == 0 {
 		return nil
 	}
-	// Build set of IPs in the latest scan
 	latestIPs := make(map[string]bool, len(records[len(records)-1].Results))
 	for _, r := range records[len(records)-1].Results {
 		latestIPs[r.IP] = true
 	}
-	// Keep the most recent data per IP
 	latest := make(map[string]scanner.Result)
 	for _, rec := range records {
 		for _, r := range rec.Results {
 			latest[r.IP] = r
 		}
 	}
+	labels := s.GetLabels()
 	out := make([]scanner.Result, 0, len(latest))
 	for _, r := range latest {
 		r.Alive = latestIPs[r.IP]
+		if name, ok := labels[r.IP]; ok {
+			r.Label = &name
+		}
 		out = append(out, r)
 	}
 	return out
+}
+
+func (s *JSONStore) SetLabel(ip, name string) error {
+	labels := s.GetLabels()
+	labels[ip] = name
+	return s.saveLabels(labels)
+}
+
+func (s *JSONStore) DeleteLabel(ip string) error {
+	labels := s.GetLabels()
+	delete(labels, ip)
+	return s.saveLabels(labels)
+}
+
+func (s *JSONStore) GetLabels() map[string]string {
+	data, err := os.ReadFile(s.labelsPath())
+	if err != nil {
+		return map[string]string{}
+	}
+	var labels map[string]string
+	if err := json.Unmarshal(data, &labels); err != nil {
+		return map[string]string{}
+	}
+	return labels
+}
+
+func (s *JSONStore) labelsPath() string { return s.path + ".labels" }
+
+func (s *JSONStore) saveLabels(labels map[string]string) error {
+	data, err := json.MarshalIndent(labels, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.labelsPath(), data, 0o644)
 }
 
 func (s *JSONStore) load() ([]Record, error) {

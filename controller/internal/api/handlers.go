@@ -14,6 +14,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ding/ding/internal/scanner"
@@ -83,6 +84,41 @@ func (s *Server) handleScan(w http.ResponseWriter, _ *http.Request) {
 	}
 	go s.runScan()                     // start scan in the background
 	w.WriteHeader(http.StatusAccepted) // 202 = "got it, working on it"
+}
+
+// handleSetLabel responds to PUT /api/devices/{ip}/label
+// Body: {"name": "Living Room Router"}
+// Sets a persistent human-readable name for the device at {ip}.
+func (s *Server) handleSetLabel(w http.ResponseWriter, r *http.Request) {
+	ip := r.PathValue("ip")
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name must not be empty"})
+		return
+	}
+	if err := s.store.SetLabel(ip, name); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDelLabel responds to DELETE /api/devices/{ip}/label
+// Removes any custom name previously set for the device at {ip}.
+func (s *Server) handleDelLabel(w http.ResponseWriter, r *http.Request) {
+	ip := r.PathValue("ip")
+	if err := s.store.DeleteLabel(ip); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleTopology responds to GET /api/topology

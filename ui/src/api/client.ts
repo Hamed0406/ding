@@ -37,3 +37,21 @@ export async function triggerScan(): Promise<void> {
     throw new Error(`scan trigger failed: HTTP ${res.status}`)
   }
 }
+
+// PUT /api/devices/{ip}/label — assign a custom name to a device.
+export async function setDeviceLabel(ip: string, name: string): Promise<void> {
+  const res = await fetch(`/api/devices/${encodeURIComponent(ip)}/label`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  if (!res.ok) throw new Error(`setDeviceLabel: HTTP ${res.status}`)
+}
+
+// DELETE /api/devices/{ip}/label — remove a custom name from a device.
+export async function deleteDeviceLabel(ip: string): Promise<void> {
+  const res = await fetch(`/api/devices/${encodeURIComponent(ip)}/label`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error(`deleteDeviceLabel: HTTP ${res.status}`)
+}

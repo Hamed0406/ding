@@ -63,9 +63,16 @@ func sqliteMigrate(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	// Add device_type to existing databases that pre-date this column.
-	// SQLite returns an error if the column already exists — we ignore it.
+	// Additive column migrations for existing databases.
+	// SQLite errors if the column already exists — both are intentionally ignored.
 	_, _ = db.Exec(`ALTER TABLE devices ADD COLUMN device_type TEXT`)
+	_, _ = db.Exec(`
+		CREATE TABLE IF NOT EXISTS device_labels (
+			ip         TEXT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`)
 	return nil
 }
 
@@ -190,13 +197,15 @@ func (s *SQLiteStore) AllKnownIPs() map[string]bool {
 
 // AllDevices returns one entry per IP (latest data for each), with alive=true
 // only for devices that appeared in the most recent scan.
+// User-assigned labels are joined in from the device_labels table.
 func (s *SQLiteStore) AllDevices() []scanner.Result {
 	rows, err := s.db.Query(`
 		SELECT
 			d.ip, d.mac, d.hostname, d.vendor, d.device_type, d.open_ports,
 			CASE WHEN d.scan_id = (SELECT MAX(id) FROM scans) THEN d.alive ELSE 0 END,
-			d.gateway, d.ttl
+			d.gateway, d.ttl, l.name
 		FROM devices d
+		LEFT JOIN device_labels l ON l.ip = d.ip
 		WHERE d.scan_id = (
 			SELECT MAX(d2.scan_id) FROM devices d2 WHERE d2.ip = d.ip
 		)
@@ -212,8 +221,11 @@ func (s *SQLiteStore) AllDevices() []scanner.Result {
 
 func (s *SQLiteStore) queryDevices(scanID int64) ([]scanner.Result, error) {
 	rows, err := s.db.Query(`
-		SELECT ip, mac, hostname, vendor, device_type, open_ports, alive, gateway, ttl
-		FROM devices WHERE scan_id = ?
+		SELECT d.ip, d.mac, d.hostname, d.vendor, d.device_type, d.open_ports,
+		       d.alive, d.gateway, d.ttl, l.name
+		FROM devices d
+		LEFT JOIN device_labels l ON l.ip = d.ip
+		WHERE d.scan_id = ?
 	`, scanID)
 	if err != nil {
 		return nil, err
@@ -223,17 +235,20 @@ func (s *SQLiteStore) queryDevices(scanID int64) ([]scanner.Result, error) {
 }
 
 // scanDeviceRows reads scanner.Result values from an open *sql.Rows.
-// Shared by queryDevices and AllDevices to avoid duplication.
+// Expects columns: ip, mac, hostname, vendor, device_type, open_ports, alive, gateway, ttl, label.
 func scanDeviceRows(rows *sql.Rows) ([]scanner.Result, error) {
 	var results []scanner.Result
 	for rows.Next() {
 		var r scanner.Result
-		var mac, hostname, vendor, deviceType, gateway sql.NullString
+		var mac, hostname, vendor, deviceType, label, gateway sql.NullString
 		var ttl sql.NullInt64
 		var portsJSON string
 		var alive int
 
-		if err := rows.Scan(&r.IP, &mac, &hostname, &vendor, &deviceType, &portsJSON, &alive, &gateway, &ttl); err != nil {
+		if err := rows.Scan(
+			&r.IP, &mac, &hostname, &vendor, &deviceType,
+			&portsJSON, &alive, &gateway, &ttl, &label,
+		); err != nil {
 			continue
 		}
 		if mac.Valid {
@@ -247,6 +262,9 @@ func scanDeviceRows(rows *sql.Rows) ([]scanner.Result, error) {
 		}
 		if deviceType.Valid {
 			r.DeviceType = &deviceType.String
+		}
+		if label.Valid {
+			r.Label = &label.String
 		}
 		if gateway.Valid {
 			r.Gateway = &gateway.String
@@ -266,6 +284,35 @@ func scanDeviceRows(rows *sql.Rows) ([]scanner.Result, error) {
 		results = append(results, r)
 	}
 	return results, rows.Err()
+}
+
+func (s *SQLiteStore) SetLabel(ip, name string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO device_labels (ip, name, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT(ip) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at
+	`, ip, name, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+func (s *SQLiteStore) DeleteLabel(ip string) error {
+	_, err := s.db.Exec(`DELETE FROM device_labels WHERE ip = ?`, ip)
+	return err
+}
+
+func (s *SQLiteStore) GetLabels() map[string]string {
+	rows, err := s.db.Query(`SELECT ip, name FROM device_labels`)
+	if err != nil {
+		return map[string]string{}
+	}
+	defer rows.Close()
+	labels := make(map[string]string)
+	for rows.Next() {
+		var ip, name string
+		if err := rows.Scan(&ip, &name); err == nil {
+			labels[ip] = name
+		}
+	}
+	return labels
 }
 
 func boolToInt(b bool) int {

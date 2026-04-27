@@ -15,6 +15,7 @@ type Result struct {
 	Hostname   *string  `json:"hostname"`
 	Vendor     *string  `json:"vendor"`
 	DeviceType *string  `json:"device_type,omitempty"`
+	Label      *string  `json:"label,omitempty"` // user-assigned custom name
 	OpenPorts  []uint16 `json:"open_ports"`
 	Alive      bool     `json:"alive"`
 	Gateway    *string  `json:"gateway,omitempty"`

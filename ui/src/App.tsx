@@ -13,7 +13,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useState } from 'react'
-import { fetchDevices, fetchStatus, triggerScan } from './api/client'
+import { deleteDeviceLabel, fetchDevices, fetchStatus, setDeviceLabel, triggerScan } from './api/client'
 import { ChangesFeed } from './components/ChangesFeed'
 import { DeviceGrid } from './components/DeviceGrid'
 import { ScanButton } from './components/ScanButton'
@@ -72,6 +72,14 @@ export default function App() {
       // 'connected' events are ignored — they just confirm the SSE stream is working
     }, []) // useCallback with [] means this function is created once and never recreated
   )
+
+  // Called when the user sets or clears a custom device name.
+  // Updates local state immediately; calls the API in the background.
+  const handleLabelChange = useCallback((ip: string, label: string | null) => {
+    setDevices((prev) => prev.map((d) => (d.ip === ip ? { ...d, label } : d)))
+    const req = label ? setDeviceLabel(ip, label) : deleteDeviceLabel(ip)
+    req.catch(console.error)
+  }, [])
 
   // Called when the user clicks "Scan now"
   const handleScan = () => {
@@ -145,7 +153,7 @@ export default function App() {
 
         {/* View: either device grid or topology map */}
         {view === 'grid' ? (
-          <DeviceGrid devices={devices} newIPs={newIPs} />
+          <DeviceGrid devices={devices} newIPs={newIPs} onLabelChange={handleLabelChange} />
         ) : (
           <TopologyMap scanCount={scanCount} />
         )}
