@@ -45,21 +45,28 @@ func sqliteMigrate(db *sql.DB) error {
 			scanned_at DATETIME NOT NULL
 		);
 		CREATE TABLE IF NOT EXISTS devices (
-			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			scan_id    INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
-			ip         TEXT    NOT NULL,
-			mac        TEXT,
-			hostname   TEXT,
-			vendor     TEXT,
-			open_ports TEXT    NOT NULL DEFAULT '[]',
-			alive      INTEGER NOT NULL DEFAULT 0,
-			gateway    TEXT,
-			ttl        INTEGER
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			scan_id     INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+			ip          TEXT    NOT NULL,
+			mac         TEXT,
+			hostname    TEXT,
+			vendor      TEXT,
+			device_type TEXT,
+			open_ports  TEXT    NOT NULL DEFAULT '[]',
+			alive       INTEGER NOT NULL DEFAULT 0,
+			gateway     TEXT,
+			ttl         INTEGER
 		);
 		CREATE INDEX IF NOT EXISTS idx_devices_scan ON devices(scan_id);
 		CREATE INDEX IF NOT EXISTS idx_devices_ip   ON devices(ip);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	// Add device_type to existing databases that pre-date this column.
+	// SQLite returns an error if the column already exists — we ignore it.
+	_, _ = db.Exec(`ALTER TABLE devices ADD COLUMN device_type TEXT`)
+	return nil
 }
 
 func (s *SQLiteStore) Save(results []scanner.Result) error {
@@ -79,8 +86,8 @@ func (s *SQLiteStore) Save(results []scanner.Result) error {
 	}
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO devices (scan_id, ip, mac, hostname, vendor, open_ports, alive, gateway, ttl)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO devices (scan_id, ip, mac, hostname, vendor, device_type, open_ports, alive, gateway, ttl)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -90,7 +97,7 @@ func (s *SQLiteStore) Save(results []scanner.Result) error {
 	for _, r := range results {
 		ports, _ := json.Marshal(r.OpenPorts)
 		if _, err := stmt.Exec(
-			scanID, r.IP, r.MAC, r.Hostname, r.Vendor,
+			scanID, r.IP, r.MAC, r.Hostname, r.Vendor, r.DeviceType,
 			string(ports), boolToInt(r.Alive), r.Gateway, r.TTL,
 		); err != nil {
 			return err
@@ -186,7 +193,7 @@ func (s *SQLiteStore) AllKnownIPs() map[string]bool {
 func (s *SQLiteStore) AllDevices() []scanner.Result {
 	rows, err := s.db.Query(`
 		SELECT
-			d.ip, d.mac, d.hostname, d.vendor, d.open_ports,
+			d.ip, d.mac, d.hostname, d.vendor, d.device_type, d.open_ports,
 			CASE WHEN d.scan_id = (SELECT MAX(id) FROM scans) THEN d.alive ELSE 0 END,
 			d.gateway, d.ttl
 		FROM devices d
@@ -199,66 +206,34 @@ func (s *SQLiteStore) AllDevices() []scanner.Result {
 		return nil
 	}
 	defer rows.Close()
-
-	var results []scanner.Result
-	for rows.Next() {
-		var r scanner.Result
-		var mac, hostname, vendor, gateway sql.NullString
-		var ttl sql.NullInt64
-		var portsJSON string
-		var alive int
-
-		if err := rows.Scan(&r.IP, &mac, &hostname, &vendor, &portsJSON, &alive, &gateway, &ttl); err != nil {
-			continue
-		}
-		if mac.Valid {
-			r.MAC = &mac.String
-		}
-		if hostname.Valid {
-			r.Hostname = &hostname.String
-		}
-		if vendor.Valid {
-			r.Vendor = &vendor.String
-		}
-		if gateway.Valid {
-			r.Gateway = &gateway.String
-		}
-		if ttl.Valid {
-			v := uint8(ttl.Int64)
-			r.TTL = &v
-		}
-		r.Alive = alive != 0
-		if portsJSON == "" {
-			portsJSON = "[]"
-		}
-		_ = json.Unmarshal([]byte(portsJSON), &r.OpenPorts)
-		if r.OpenPorts == nil {
-			r.OpenPorts = []uint16{}
-		}
-		results = append(results, r)
-	}
+	results, _ := scanDeviceRows(rows)
 	return results
 }
 
 func (s *SQLiteStore) queryDevices(scanID int64) ([]scanner.Result, error) {
 	rows, err := s.db.Query(`
-		SELECT ip, mac, hostname, vendor, open_ports, alive, gateway, ttl
+		SELECT ip, mac, hostname, vendor, device_type, open_ports, alive, gateway, ttl
 		FROM devices WHERE scan_id = ?
 	`, scanID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanDeviceRows(rows)
+}
 
+// scanDeviceRows reads scanner.Result values from an open *sql.Rows.
+// Shared by queryDevices and AllDevices to avoid duplication.
+func scanDeviceRows(rows *sql.Rows) ([]scanner.Result, error) {
 	var results []scanner.Result
 	for rows.Next() {
 		var r scanner.Result
-		var mac, hostname, vendor, gateway sql.NullString
+		var mac, hostname, vendor, deviceType, gateway sql.NullString
 		var ttl sql.NullInt64
 		var portsJSON string
 		var alive int
 
-		if err := rows.Scan(&r.IP, &mac, &hostname, &vendor, &portsJSON, &alive, &gateway, &ttl); err != nil {
+		if err := rows.Scan(&r.IP, &mac, &hostname, &vendor, &deviceType, &portsJSON, &alive, &gateway, &ttl); err != nil {
 			continue
 		}
 		if mac.Valid {
@@ -269,6 +244,9 @@ func (s *SQLiteStore) queryDevices(scanID int64) ([]scanner.Result, error) {
 		}
 		if vendor.Valid {
 			r.Vendor = &vendor.String
+		}
+		if deviceType.Valid {
+			r.DeviceType = &deviceType.String
 		}
 		if gateway.Valid {
 			r.Gateway = &gateway.String
@@ -285,7 +263,6 @@ func (s *SQLiteStore) queryDevices(scanID int64) ([]scanner.Result, error) {
 		if r.OpenPorts == nil {
 			r.OpenPorts = []uint16{}
 		}
-
 		results = append(results, r)
 	}
 	return results, rows.Err()

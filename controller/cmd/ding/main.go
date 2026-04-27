@@ -24,6 +24,7 @@ import (
 
 	"github.com/ding/ding/internal/alert"
 	"github.com/ding/ding/internal/api"
+	"github.com/ding/ding/internal/classify"
 	"github.com/ding/ding/internal/diff"
 	"github.com/ding/ding/internal/enrich"
 	"github.com/ding/ding/internal/iface"
@@ -62,6 +63,10 @@ func main() {
 		// Tag each device with its MAC vendor (Apple, Cisco, etc.).
 		// Pure in-memory lookup against the embedded IEEE OUI database.
 		vendor.Annotate(results)
+
+		// Guess device category (Router, Smart Device, Printer, …) from
+		// vendor name and open ports. Must run after vendor.Annotate.
+		classify.Annotate(results)
 
 		// Load what we found last time so we can compare
 		previous := store.Latest()

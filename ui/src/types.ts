@@ -12,6 +12,7 @@ export interface Device {
   mac: string | null   // e.g. "aa:bb:cc:dd:ee:ff" — null if unknown
   hostname: string | null // reverse-DNS name, e.g. "router.lan" — null if no PTR record
   vendor: string | null   // MAC vendor, e.g. "Apple, Inc." — null if OUI not in IEEE database
+  device_type: string | null // guessed category, e.g. "Router", "Smart Device" — null if unknown
   open_ports: number[] // e.g. [22, 80, 443]
   alive: boolean       // true if device responded to ping
 }

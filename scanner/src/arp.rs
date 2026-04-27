@@ -184,8 +184,7 @@ pub fn listen(iface_name: &str) -> Result<()> {
             }
             // Read timeout — normal, just loop again
             Err(e)
-                if e.kind() == io::ErrorKind::TimedOut
-                    || e.kind() == io::ErrorKind::WouldBlock =>
+                if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock =>
             {
                 continue;
             }

@@ -10,14 +10,15 @@ import (
 )
 
 type Result struct {
-	IP        string   `json:"ip"`
-	MAC       *string  `json:"mac"`
-	Hostname  *string  `json:"hostname"`
-	Vendor    *string  `json:"vendor"`
-	OpenPorts []uint16 `json:"open_ports"`
-	Alive     bool     `json:"alive"`
-	Gateway   *string  `json:"gateway,omitempty"`
-	TTL       *uint8   `json:"ttl,omitempty"`
+	IP         string   `json:"ip"`
+	MAC        *string  `json:"mac"`
+	Hostname   *string  `json:"hostname"`
+	Vendor     *string  `json:"vendor"`
+	DeviceType *string  `json:"device_type,omitempty"`
+	OpenPorts  []uint16 `json:"open_ports"`
+	Alive      bool     `json:"alive"`
+	Gateway    *string  `json:"gateway,omitempty"`
+	TTL        *uint8   `json:"ttl,omitempty"`
 }
 
 // ArpEvent is emitted by the scanner in --mode listen, one JSON line per event.
