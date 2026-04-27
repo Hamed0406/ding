@@ -38,21 +38,21 @@ const MDNS_PORT: u16 = 5353;
 // Service types to actively query. Each one causes devices offering that
 // service to send an announcement, giving us PTR + SRV + A records.
 const SERVICE_TYPES: &[&str] = &[
-    "_googlecast._tcp.local.",   // Chromecast, Google Cast TVs
-    "_airplay._tcp.local.",      // Apple TV, AirPlay receivers
-    "_raop._tcp.local.",         // AirPlay audio (HomePod, Apple TV)
-    "_hap._tcp.local.",          // HomeKit accessories
-    "_homekit._tcp.local.",      // HomeKit (older variant)
+    "_googlecast._tcp.local.",      // Chromecast, Google Cast TVs
+    "_airplay._tcp.local.",         // Apple TV, AirPlay receivers
+    "_raop._tcp.local.",            // AirPlay audio (HomePod, Apple TV)
+    "_hap._tcp.local.",             // HomeKit accessories
+    "_homekit._tcp.local.",         // HomeKit (older variant)
     "_spotify-connect._tcp.local.", // Spotify Connect speakers
-    "_printer._tcp.local.",      // Generic network printers
-    "_ipp._tcp.local.",          // IPP printers (most modern printers)
-    "_pdl-datastream._tcp.local.", // PCL/PDL printers (HP JetDirect)
-    "_workstation._tcp.local.",  // Linux/macOS workstations (Avahi)
-    "_ssh._tcp.local.",          // SSH servers
-    "_smb._tcp.local.",          // Windows/Samba file shares (NAS)
-    "_afpovertcp._tcp.local.",   // Apple File Protocol (Mac)
-    "_daap._tcp.local.",         // iTunes / Music sharing (media server)
-    "_device-info._tcp.local.",  // Apple device model info
+    "_printer._tcp.local.",         // Generic network printers
+    "_ipp._tcp.local.",             // IPP printers (most modern printers)
+    "_pdl-datastream._tcp.local.",  // PCL/PDL printers (HP JetDirect)
+    "_workstation._tcp.local.",     // Linux/macOS workstations (Avahi)
+    "_ssh._tcp.local.",             // SSH servers
+    "_smb._tcp.local.",             // Windows/Samba file shares (NAS)
+    "_afpovertcp._tcp.local.",      // Apple File Protocol (Mac)
+    "_daap._tcp.local.",            // iTunes / Music sharing (media server)
+    "_device-info._tcp.local.",     // Apple device model info
 ];
 
 /// Runs an mDNS discovery scan for `timeout_ms` milliseconds.
@@ -98,8 +98,7 @@ pub fn scan(iface_name: &str, timeout_ms: u64) -> Result<()> {
         let (len, _) = match socket.recv_from(&mut buf) {
             Ok(r) => r,
             Err(e)
-                if e.kind() == io::ErrorKind::WouldBlock
-                    || e.kind() == io::ErrorKind::TimedOut =>
+                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut =>
             {
                 continue
             }
