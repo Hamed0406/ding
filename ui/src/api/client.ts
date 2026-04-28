@@ -10,6 +10,7 @@
 //   fetchHistory()             GET /api/history
 //   fetchTopology()            GET /api/topology
 //   triggerScan()              POST /api/scan
+//   scanDevice(ip)             POST /api/devices/{ip}/scan
 //   setDeviceLabel(ip, name)   PUT /api/devices/{ip}/label
 //   deleteDeviceLabel(ip)      DELETE /api/devices/{ip}/label
 // ============================================================
@@ -49,6 +50,14 @@ export async function triggerScan(): Promise<void> {
   if (res.status !== 202 && res.status !== 409) {
     throw new Error(`scan trigger failed: HTTP ${res.status}`)
   }
+}
+
+// POST /api/devices/{ip}/scan — targeted port scan for one device.
+// Runs a parallel TCP probe on the server side and returns open ports immediately.
+export async function scanDevice(ip: string): Promise<{ ip: string; open_ports: number[] }> {
+  const res = await fetch(`/api/devices/${encodeURIComponent(ip)}/scan`, { method: 'POST' })
+  if (!res.ok) throw new Error(`scanDevice: HTTP ${res.status}`)
+  return res.json()
 }
 
 // PUT /api/devices/{ip}/label — assign a custom name to a device.

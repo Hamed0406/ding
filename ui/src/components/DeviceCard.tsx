@@ -1,9 +1,11 @@
 // One card in the device grid — shows everything we know about a single device.
 // Click anywhere on the card to open the full-page history view for that device.
 // Hover to reveal the pencil button; click it (or just the pencil) to set a custom name inline.
+// Alive devices show a "Scan ports" button that runs an instant targeted port scan.
 
 import { useEffect, useRef, useState } from 'react'
 import type { Device } from '../types'
+import { scanDevice } from '../api/client'
 import { portLabel } from '../utils/ports'
 
 interface Props {
@@ -58,6 +60,10 @@ function PencilIcon() {
 export function DeviceCard({ device, isNew, onLabelChange, onSelect }: Props) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(device.label ?? '')
+  // scannedPorts: null = not yet scanned, [] = scan found nothing, [22,80,...] = results
+  const [scannedPorts, setScannedPorts] = useState<number[] | null>(null)
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   // Keep draft in sync with external label changes (e.g. from SSE) when not editing.
@@ -86,6 +92,21 @@ export function DeviceCard({ device, isNew, onLabelChange, onSelect }: Props) {
     if (e.key === 'Escape') {
       setDraft(device.label ?? '')
       setEditing(false)
+    }
+  }
+
+  const runScan = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (scanning) return
+    setScanning(true)
+    setScanError(false)
+    try {
+      const result = await scanDevice(device.ip)
+      setScannedPorts(result.open_ports)
+    } catch {
+      setScanError(true)
+    } finally {
+      setScanning(false)
     }
   }
 
@@ -170,21 +191,67 @@ export function DeviceCard({ device, isNew, onLabelChange, onSelect }: Props) {
         <p className="text-xs text-slate-400 truncate">{device.hostname}</p>
       )}
 
-      {/* Open ports */}
-      {device.open_ports.length > 0 ? (
-        <div className="flex flex-wrap gap-1 pt-1">
-          {device.open_ports.map((p) => (
-            <span
-              key={p}
-              className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-700 text-cyan-300"
-              title={String(p)}
-            >
-              {portLabel(p)}
+      {/* Open ports — shows live scan result if available, otherwise last known */}
+      {(() => {
+        const ports = scannedPorts ?? device.open_ports
+        return ports.length > 0 ? (
+          <div className="flex flex-wrap gap-1 pt-1">
+            {ports.map((p) => (
+              <span
+                key={p}
+                className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-700 text-cyan-300"
+                title={String(p)}
+              >
+                {portLabel(p)}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[10px] text-slate-600 pt-1">
+            {scannedPorts !== null ? 'no open ports found' : 'no open ports'}
+          </p>
+        )
+      })()}
+
+      {/* Scan ports button — only shown for online devices */}
+      {device.alive && (
+        <div className="pt-1 flex items-center gap-2">
+          <button
+            onClick={runScan}
+            disabled={scanning}
+            className={[
+              'flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors',
+              scanning
+                ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                : 'bg-slate-700 hover:bg-cyan-900/60 text-slate-400 hover:text-cyan-300',
+            ].join(' ')}
+          >
+            {scanning ? (
+              <>
+                <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                  <circle cx="12" cy="12" r="9" strokeOpacity="0.25"/>
+                  <path d="M12 3a9 9 0 0 1 9 9" strokeLinecap="round"/>
+                </svg>
+                Scanning…
+              </>
+            ) : (
+              <>
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                  <path fillRule="evenodd" d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm9 .5H7v-5h2v5zm0 2.5H7v-1.5h2V11z"/>
+                </svg>
+                Scan ports
+              </>
+            )}
+          </button>
+          {scanError && (
+            <span className="text-[10px] text-red-400">scan failed</span>
+          )}
+          {scannedPorts !== null && !scanning && !scanError && (
+            <span className="text-[10px] text-slate-500">
+              {scannedPorts.length} port{scannedPorts.length !== 1 ? 's' : ''} open
             </span>
-          ))}
+          )}
         </div>
-      ) : (
-        <p className="text-[10px] text-slate-600 pt-1">no open ports</p>
       )}
 
       {/* NEW badge */}

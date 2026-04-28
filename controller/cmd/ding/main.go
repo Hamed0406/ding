@@ -137,7 +137,12 @@ func main() {
 	broker := api.NewBroker()
 
 	// Create the HTTP server: serves the web UI, REST API, and SSE stream
-	srv := api.NewServer(api.Config{Iface: cfg.iface, Subnet: cfg.subnet}, store, broker, scanFn)
+	srv := api.NewServer(api.Config{
+		Iface:     cfg.iface,
+		Subnet:    cfg.subnet,
+		Ports:     cfg.ports,
+		TimeoutMs: cfg.timeoutMs,
+	}, store, broker, scanFn)
 
 	// Run one scan immediately so the UI has data as soon as you open it
 	srv.TriggerScan()

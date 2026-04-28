@@ -34,10 +34,13 @@ var staticFiles embed.FS
 // It returns the list of found devices, what changed vs last scan, or an error.
 type ScanFunc func() ([]scanner.Result, []diff.Change, error)
 
-// Config holds the info the API layer needs to answer status requests.
+// Config holds the info the API layer needs to answer status requests
+// and run targeted single-device port scans.
 type Config struct {
-	Iface  string // e.g. "wlp0s20f3"
-	Subnet string // e.g. "192.168.1.0/24"
+	Iface     string // e.g. "wlp0s20f3"
+	Subnet    string // e.g. "192.168.1.0/24"
+	Ports     string // comma-separated, e.g. "22,80,443,554,8000,8080,8443"
+	TimeoutMs int    // per-host TCP timeout in milliseconds
 }
 
 // sseEvent is the shape of every message we push to the browser.
@@ -80,9 +83,10 @@ func NewServer(cfg Config, store storage.Store, broker *Broker, scanFn ScanFunc)
 	s.mux.HandleFunc("GET /api/devices/{ip}/history", s.handleDeviceHistory) // per-device scan history
 	s.mux.HandleFunc("GET /api/history", s.handleHistory)                 // last 20 scan records
 	s.mux.HandleFunc("GET /api/topology", s.handleTopology)               // network topology graph
-	s.mux.HandleFunc("POST /api/scan", s.handleScan)                      // trigger a new scan
-	s.mux.HandleFunc("PUT /api/devices/{ip}/label", s.handleSetLabel)     // set custom device name
-	s.mux.HandleFunc("DELETE /api/devices/{ip}/label", s.handleDelLabel)  // remove custom device name
+	s.mux.HandleFunc("POST /api/scan", s.handleScan)                         // trigger a new scan
+	s.mux.HandleFunc("POST /api/devices/{ip}/scan", s.handleDeviceScan)      // targeted single-device port scan
+	s.mux.HandleFunc("PUT /api/devices/{ip}/label", s.handleSetLabel)        // set custom device name
+	s.mux.HandleFunc("DELETE /api/devices/{ip}/label", s.handleDelLabel)     // remove custom device name
 	s.mux.HandleFunc("GET /api/events", s.broker.serveSSE)                // SSE stream
 
 	// Everything else (/, /assets/..., etc.) serves the React app

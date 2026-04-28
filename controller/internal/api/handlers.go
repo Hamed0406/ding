@@ -16,8 +16,13 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ding/ding/internal/scanner"
@@ -133,6 +138,66 @@ func (s *Server) handleDeviceHistory(w http.ResponseWriter, r *http.Request) {
 		entries = []storage.DeviceHistoryEntry{}
 	}
 	writeJSON(w, http.StatusOK, entries)
+}
+
+// handleDeviceScan responds to POST /api/devices/{ip}/scan
+// Runs an immediate parallel TCP port scan against the single device and
+// returns the open ports as JSON — no Rust subprocess, no SSE, result is instant.
+func (s *Server) handleDeviceScan(w http.ResponseWriter, r *http.Request) {
+	ip := r.PathValue("ip")
+	ports := parsePorts(s.cfg.Ports)
+	timeout := time.Duration(s.cfg.TimeoutMs) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 500 * time.Millisecond
+	}
+
+	open := tcpScanOne(ip, ports, timeout)
+
+	type response struct {
+		IP        string   `json:"ip"`
+		OpenPorts []uint16 `json:"open_ports"`
+	}
+	writeJSON(w, http.StatusOK, response{IP: ip, OpenPorts: open})
+}
+
+// tcpScanOne probes all ports on a single IP in parallel and returns the open ones sorted.
+func tcpScanOne(ip string, ports []uint16, timeout time.Duration) []uint16 {
+	var mu sync.Mutex
+	var open []uint16
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 50) // max 50 concurrent dials
+
+	for _, port := range ports {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(p uint16) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, p), timeout)
+			if err == nil {
+				conn.Close()
+				mu.Lock()
+				open = append(open, p)
+				mu.Unlock()
+			}
+		}(port)
+	}
+	wg.Wait()
+
+	sort.Slice(open, func(i, j int) bool { return open[i] < open[j] })
+	return open
+}
+
+// parsePorts converts a comma-separated port string into a []uint16.
+func parsePorts(s string) []uint16 {
+	var ports []uint16
+	for _, p := range strings.Split(s, ",") {
+		n, err := strconv.ParseUint(strings.TrimSpace(p), 10, 16)
+		if err == nil {
+			ports = append(ports, uint16(n))
+		}
+	}
+	return ports
 }
 
 // handleTopology responds to GET /api/topology
