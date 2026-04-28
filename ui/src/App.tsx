@@ -19,7 +19,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AuthError, deleteDeviceLabel, exchangeToken, fetchDevices, fetchStatus, logout, setDeviceLabel, triggerScan } from './api/client'
+import { AuthError, deleteDeviceLabel, exchangeToken, fetchDevices, fetchStatus, logout, setDeviceLabel, setDeviceNotify, triggerScan } from './api/client'
 import { ChangesFeed } from './components/ChangesFeed'
 import { DeviceGrid } from './components/DeviceGrid'
 import { DeviceHistory } from './components/DeviceHistory'
@@ -122,6 +122,12 @@ export default function App() {
     setDevices((prev) => prev.map((d) => (d.ip === ip ? { ...d, label } : d)))
     const req = label ? setDeviceLabel(ip, label) : deleteDeviceLabel(ip)
     req.catch(console.error)
+  }, [])
+
+  // Called when the user toggles the notification bell on a device card.
+  const handleNotifyChange = useCallback((ip: string, enabled: boolean) => {
+    setDevices((prev) => prev.map((d) => (d.ip === ip ? { ...d, notify: enabled } : d)))
+    setDeviceNotify(ip, enabled).catch(console.error)
   }, [])
 
   const handleLogout = () => {
@@ -312,6 +318,7 @@ export default function App() {
                   devices={filteredDevices}
                   newIPs={newIPs}
                   onLabelChange={handleLabelChange}
+                  onNotifyChange={handleNotifyChange}
                   onSelect={setSelectedDeviceIP}
                 />
               )

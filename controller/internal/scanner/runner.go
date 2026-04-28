@@ -28,6 +28,7 @@ type Result struct {
 	DeviceType *string  `json:"device_type,omitempty"`
 	OS         *string  `json:"os,omitempty"`          // inferred OS (Linux, Windows, macOS, iOS, Android)
 	Label      *string  `json:"label,omitempty"`       // user-assigned custom name
+	Notify     bool     `json:"notify"`                // true = send alerts for this device (user preference)
 	OpenPorts  []uint16 `json:"open_ports"`
 	Alive      bool     `json:"alive"`
 	Gateway    *string  `json:"gateway,omitempty"`

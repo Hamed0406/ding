@@ -260,6 +260,7 @@ func NewServer(cfg Config, store storage.Store, users storage.UserStore, broker 
 	s.mux.HandleFunc("POST /api/devices/{ip}/wake", s.requireAuth(s.handleWake))
 	s.mux.HandleFunc("PUT /api/devices/{ip}/label", s.requireAuth(s.handleSetLabel))
 	s.mux.HandleFunc("DELETE /api/devices/{ip}/label", s.requireAuth(s.handleDelLabel))
+	s.mux.HandleFunc("PUT /api/devices/{ip}/notify", s.requireAuth(s.handleSetNotify))
 	s.mux.HandleFunc("GET /api/events", s.requireAuth(s.broker.serveSSE))
 
 	// Static files — always served so the React app loads on the login page too

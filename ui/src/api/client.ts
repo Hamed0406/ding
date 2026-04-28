@@ -150,6 +150,12 @@ export async function wakeDevice(ip: string): Promise<void> {
   if (!res.ok) throw new Error(`wakeDevice: HTTP ${res.status}`)
 }
 
+// PUT /api/devices/{ip}/notify
+export async function setDeviceNotify(ip: string, enabled: boolean): Promise<void> {
+  const res = await send('PUT', `/api/devices/${encodeURIComponent(ip)}/notify`, { enabled })
+  if (!res.ok) throw new Error(`setDeviceNotify: HTTP ${res.status}`)
+}
+
 // PUT /api/devices/{ip}/label
 export async function setDeviceLabel(ip: string, name: string): Promise<void> {
   const res = await send('PUT', `/api/devices/${encodeURIComponent(ip)}/label`, { name })

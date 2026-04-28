@@ -86,6 +86,12 @@ func sqliteMigrate(db *sql.DB) error {
 			updated_at DATETIME NOT NULL
 		)
 	`)
+	_, _ = db.Exec(`
+		CREATE TABLE IF NOT EXISTS device_notify (
+			ip      TEXT PRIMARY KEY,
+			enabled INTEGER NOT NULL DEFAULT 1
+		)
+	`)
 	// User authentication tables.
 	_, _ = db.Exec(`
 		CREATE TABLE IF NOT EXISTS users (
@@ -233,9 +239,10 @@ func (s *SQLiteStore) AllDevices() []scanner.Result {
 		SELECT
 			d.ip, d.mac, d.hostname, d.vendor, d.device_type, d.os, d.open_ports,
 			CASE WHEN d.scan_id = (SELECT MAX(id) FROM scans) THEN d.alive ELSE 0 END,
-			d.gateway, d.ttl, l.name
+			d.gateway, d.ttl, l.name, COALESCE(n.enabled, 0) AS notify
 		FROM devices d
 		LEFT JOIN device_labels l ON l.ip = d.ip
+		LEFT JOIN device_notify n ON n.ip = d.ip
 		WHERE d.scan_id = (
 			SELECT MAX(d2.scan_id) FROM devices d2 WHERE d2.ip = d.ip
 		)
@@ -252,7 +259,7 @@ func (s *SQLiteStore) AllDevices() []scanner.Result {
 func (s *SQLiteStore) queryDevices(scanID int64) ([]scanner.Result, error) {
 	rows, err := s.db.Query(`
 		SELECT d.ip, d.mac, d.hostname, d.vendor, d.device_type, d.os, d.open_ports,
-		       d.alive, d.gateway, d.ttl, l.name
+		       d.alive, d.gateway, d.ttl, l.name, 1 AS notify
 		FROM devices d
 		LEFT JOIN device_labels l ON l.ip = d.ip
 		WHERE d.scan_id = ?
@@ -265,7 +272,7 @@ func (s *SQLiteStore) queryDevices(scanID int64) ([]scanner.Result, error) {
 }
 
 // scanDeviceRows reads scanner.Result values from an open *sql.Rows.
-// Expects columns: ip, mac, hostname, vendor, device_type, os, open_ports, alive, gateway, ttl, label.
+// Expects columns: ip, mac, hostname, vendor, device_type, os, open_ports, alive, gateway, ttl, label, notify.
 func scanDeviceRows(rows *sql.Rows) ([]scanner.Result, error) {
 	var results []scanner.Result
 	for rows.Next() {
@@ -273,11 +280,11 @@ func scanDeviceRows(rows *sql.Rows) ([]scanner.Result, error) {
 		var mac, hostname, vendor, deviceType, os, label, gateway sql.NullString
 		var ttl sql.NullInt64
 		var portsJSON string
-		var alive int
+		var alive, notify int
 
 		if err := rows.Scan(
 			&r.IP, &mac, &hostname, &vendor, &deviceType, &os,
-			&portsJSON, &alive, &gateway, &ttl, &label,
+			&portsJSON, &alive, &gateway, &ttl, &label, &notify,
 		); err != nil {
 			continue
 		}
@@ -307,6 +314,7 @@ func scanDeviceRows(rows *sql.Rows) ([]scanner.Result, error) {
 			r.TTL = &v
 		}
 		r.Alive = alive != 0
+		r.Notify = notify != 0
 		if portsJSON == "" {
 			portsJSON = "[]"
 		}
@@ -372,6 +380,14 @@ func (s *SQLiteStore) SetLabel(ip, name string) error {
 
 func (s *SQLiteStore) DeleteLabel(ip string) error {
 	_, err := s.db.Exec(`DELETE FROM device_labels WHERE ip = ?`, ip)
+	return err
+}
+
+func (s *SQLiteStore) SetNotify(ip string, enabled bool) error {
+	_, err := s.db.Exec(`
+		INSERT INTO device_notify (ip, enabled) VALUES (?, ?)
+		ON CONFLICT(ip) DO UPDATE SET enabled = excluded.enabled
+	`, ip, boolToInt(enabled))
 	return err
 }
 

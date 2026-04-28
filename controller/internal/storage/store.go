@@ -63,6 +63,10 @@ type Store interface {
 	DeleteLabel(ip string) error
 	// GetLabels returns all stored ip→name mappings.
 	GetLabels() map[string]string
+
+	// SetNotify enables or disables change alerts for the given IP address.
+	// Devices default to enabled; only a false value is stored persistently.
+	SetNotify(ip string, enabled bool) error
 }
 
 // JSONStore is the legacy Store implementation: a single JSON file on disk.
@@ -207,6 +211,8 @@ func (s *JSONStore) GetLabels() map[string]string {
 	}
 	return labels
 }
+
+func (s *JSONStore) SetNotify(_ string, _ bool) error { return nil }
 
 func (s *JSONStore) labelsPath() string { return s.path + ".labels" }
 

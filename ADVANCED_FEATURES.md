@@ -19,11 +19,18 @@
 | Scan-to-scan diff: NEW / BACK / GONE / PORTS | `internal/diff/diff.go` |
 | SQLite scan history (normalized, per-device queries) | `internal/storage/sqlite_store.go` |
 | Device labelling (custom names, persisted in SQLite) | `internal/api/handlers.go` |
+| Per-device port scan (instant, no full network scan) | `internal/api/handlers.go` |
+| Wake-on-LAN (magic packet via UDP broadcast) | `internal/api/handlers.go` |
+| Per-device notification opt-in (bell toggle, disabled by default) | `internal/storage/sqlite_store.go`, `internal/api/handlers.go` |
 | Network topology map (SVG star layout) | `internal/topology/topology.go`, `ui/src/components/TopologyMap.tsx` |
 | Per-device history view (dot timeline, scan log) | `ui/src/components/DeviceHistory.tsx` |
+| Device search and status filter (online / offline) | `ui/src/App.tsx` |
 | Real-time SSE event stream | `internal/api/sse.go` |
-| Telegram alerts (NEW / GONE / PORTS / BACK) | `internal/alert/alert.go` |
+| Telegram alerts — opt-in per device | `internal/alert/alert.go`, `internal/storage/sqlite_store.go` |
 | Port number → service name labels in UI | `ui/src/utils/ports.ts` |
+| Email/password authentication (bcrypt, session cookie + bearer token) | `internal/api/handlers.go`, `internal/storage/sqlite_store.go` |
+| Google OAuth login | `internal/api/auth.go` |
+| GitHub OAuth login | `internal/api/auth.go` |
 | React PWA — installable on Android | `ui/` |
 | Auto-detect network interface and subnet | `internal/iface/detect.go` |
 | Docker multi-arch images (amd64 + arm64) | `Dockerfile` |
@@ -34,16 +41,15 @@
 
 ### Quick wins
 - **Email / Slack alerts** — add alongside Telegram in `internal/alert/alert.go`
-- **Dark mode** — Tailwind `dark:` variants; toggle stored in `localStorage`
 - **CSV / JSON export** — new handler in `internal/api/handlers.go`
-- **Custom alert rules** — alert only on specific IPs or port changes
+- **Dark / light mode toggle** — Tailwind `dark:` variants; preference stored in `localStorage`
 
 ### Medium complexity
 - **Uptime graphs** — per-device availability % over time; data already in SQLite
 - **Multi-subnet scanning** — accept comma-separated `DING_SUBNET` values
-- **API authentication** — HTTP Basic or bearer token middleware in `internal/api/server.go`
 - **NetBIOS / LLMNR names** — additional enricher alongside DNS lookup
-- **Wake-on-LAN** — new API endpoint; sends magic packet via `net.UDPConn`
+- **DHCP hostname snooping** — read `/proc/net/arp` or listen on UDP 67 for DHCP hostnames
+- **Alert cooldown / dedup** — suppress repeated GONE alerts for a device that flaps
 
 ### Advanced
 - **IPv6 support** — ICMPv6 neighbor discovery in Rust; extend `types.rs` for IPv6
@@ -58,6 +64,8 @@
 
 - **Adding a new enricher** — create a file in `internal/enrich/`, add the call in `cmd/ding/main.go` after the scanner results are returned. The pipeline runs: DNS → Vendor → Classify → HTTP banner → RTSP → mDNS overlay → OS.
 - **Adding a new device rule** — edit `portTypes` or `vendorTypes` in `internal/classify/classify.go`. No other code changes needed.
-- **Adding a new alert channel** — add a function to `internal/alert/alert.go` and call it from `alert.Send()`.
-- **Swapping the storage backend** — implement the `storage.Store` interface (10 methods), then change one line in `cmd/ding/main.go`.
+- **Adding a new alert channel** — add a function to `internal/alert/alert.go` and call it from `alert.Send()`. The changes slice passed in is already pre-filtered to only include devices with notifications enabled.
+- **Swapping the storage backend** — implement the `storage.Store` interface (13 methods: `Save`, `Latest`, `LatestRecord`, `History`, `AllKnownIPs`, `AllDevices`, `DeviceHistory`, `SetLabel`, `DeleteLabel`, `GetLabels`, `SetNotify`, `UserStore` methods), then change one line in `cmd/ding/main.go`.
+- **Notification opt-in storage** — the `device_notify` table stores only overrides. Absence of a row means notifications disabled (the default). `COALESCE(n.enabled, 0)` in the `AllDevices` query implements this default.
+- **OAuth behind a reverse proxy** — the exchange token pattern (`/#exchange=TOKEN` URL fragment) works around Cloudflare Tunnel stripping `Set-Cookie` headers from redirect responses. Fragments are browser-only and never forwarded to proxies.
 - **Android detection limitation** — Android 10+ randomizes the MAC address per Wi-Fi network, defeating vendor-based detection. Hostname patterns (`android-XXXX`) and Samsung OUI rules are the best available signals without DHCP snooping.

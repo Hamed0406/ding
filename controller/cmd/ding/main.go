@@ -125,8 +125,23 @@ func main() {
 			log.Printf("save: %v", err)
 		}
 
-		// Send Telegram alert if a token is configured and something changed
-		if err := alert.Send(cfg.alert, changes); err != nil {
+		// Send Telegram alert only for devices that have notifications explicitly enabled.
+		// Notifications are opt-in: devices default to disabled until the user enables them.
+		var alertChanges []diff.Change
+		if len(changes) > 0 {
+			enabled := make(map[string]bool)
+			for _, d := range store.AllDevices() {
+				if d.Notify {
+					enabled[d.IP] = true
+				}
+			}
+			for _, c := range changes {
+				if enabled[c.IP] {
+					alertChanges = append(alertChanges, c)
+				}
+			}
+		}
+		if err := alert.Send(cfg.alert, alertChanges); err != nil {
 			log.Printf("alert: %v", err)
 		}
 

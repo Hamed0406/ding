@@ -261,6 +261,25 @@ func (s *Server) handleSetLabel(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleSetNotify responds to PUT /api/devices/{ip}/notify
+// Body: {"enabled": true|false}
+// Enables or disables change alerts for the device at {ip}.
+func (s *Server) handleSetNotify(w http.ResponseWriter, r *http.Request) {
+	ip := r.PathValue("ip")
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if err := s.store.SetNotify(ip, body.Enabled); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleDelLabel responds to DELETE /api/devices/{ip}/label
 // Removes any custom name previously set for the device at {ip}.
 func (s *Server) handleDelLabel(w http.ResponseWriter, r *http.Request) {

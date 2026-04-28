@@ -15,6 +15,7 @@ export interface Device {
   device_type: string | null // inferred category, e.g. "Router", "Smart Device" — null if unknown
   os: string | null          // inferred OS from TTL + ports, e.g. "Linux", "Windows" — null if unknown
   label: string | null       // user-assigned custom name — null if not set
+  notify: boolean            // true = send alerts when this device changes (default)
   open_ports: number[]     // e.g. [22, 80, 443]
   alive: boolean           // true if device responded in the most recent scan
 }

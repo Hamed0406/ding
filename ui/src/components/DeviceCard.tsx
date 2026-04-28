@@ -12,6 +12,7 @@ interface Props {
   device: Device
   isNew?: boolean
   onLabelChange: (ip: string, label: string | null) => void
+  onNotifyChange: (ip: string, enabled: boolean) => void
   onSelect: () => void
 }
 
@@ -48,6 +49,25 @@ function TypeBadge({ type }: { type: string }) {
   )
 }
 
+function BellIcon({ muted }: { muted: boolean }) {
+  return muted ? (
+    // Bell with a diagonal slash — notifications off
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      <path d="M18.63 13A17.89 17.89 0 0 1 18 8"/>
+      <path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/>
+      <path d="M18 8a6 6 0 0 0-9.33-5"/>
+      <line x1="1" y1="1" x2="23" y2="23"/>
+    </svg>
+  ) : (
+    // Regular bell — notifications on
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+    </svg>
+  )
+}
+
 // Minimal pencil SVG — no emoji, matches the dark palette.
 function PencilIcon() {
   return (
@@ -57,7 +77,7 @@ function PencilIcon() {
   )
 }
 
-export function DeviceCard({ device, isNew, onLabelChange, onSelect }: Props) {
+export function DeviceCard({ device, isNew, onLabelChange, onNotifyChange, onSelect }: Props) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(device.label ?? '')
   // scannedPorts: null = not yet scanned, [] = scan found nothing, [22,80,...] = results
@@ -140,11 +160,23 @@ export function DeviceCard({ device, isNew, onLabelChange, onSelect }: Props) {
           : 'bg-slate-800 border-slate-700 hover:border-slate-600',
       ].join(' ')}
     >
-      {/* Row 1: device type badge + alive dot */}
+      {/* Row 1: device type badge + bell toggle + alive dot */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex-1 min-w-0">
           {device.device_type && <TypeBadge type={device.device_type} />}
         </div>
+        <button
+          onClick={(e) => { e.stopPropagation(); onNotifyChange(device.ip, !device.notify) }}
+          className={[
+            'flex-shrink-0 transition-colors',
+            device.notify
+              ? 'text-cyan-500 hover:text-cyan-400'
+              : 'text-slate-600 hover:text-slate-400',
+          ].join(' ')}
+          title={device.notify ? 'Disable notifications' : 'Enable notifications'}
+        >
+          <BellIcon muted={!device.notify} />
+        </button>
         <span
           className={[
             'w-2.5 h-2.5 rounded-full flex-shrink-0',

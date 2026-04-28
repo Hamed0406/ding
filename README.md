@@ -96,8 +96,12 @@ The UI is a React PWA bundled into the Go binary. It works in any browser and is
 |---|---|
 | **Scan now** | Trigger an on-demand scan; results appear in real time via SSE |
 | **Device grid** | All discovered devices — IP, MAC, hostname, vendor, device type, OS, open ports, alive status |
+| **Search & filter** | Filter devices by name, IP, vendor, OS, or type; filter by online/offline status |
 | **Device history** | Click any device card to open a full-page history view — dot timeline, uptime %, scan log with port-change markers |
 | **Device labelling** | Assign a custom name to any device ("Living Room TV") that persists across scans |
+| **Per-device port scan** | Scan an individual device's ports on demand from its card — no full network scan needed |
+| **Wake-on-LAN** | Send a magic packet to wake an offline device (requires known MAC address) |
+| **Notification opt-in** | Bell icon on each card — notifications are off by default; click to enable alerts for specific devices only |
 | **Hostnames** | Reverse-DNS lookup runs in parallel after every scan (best-effort, 300 ms per host) |
 | **MAC vendor** | Manufacturer name looked up from the embedded IEEE OUI database (no account needed) |
 | **Device type** | Device category guessed from vendor + ports + HTTP banner + RTSP + mDNS (50+ rules) |
@@ -107,7 +111,8 @@ The UI is a React PWA bundled into the Go binary. It works in any browser and is
 | **Changes feed** | NEW / GONE / BACK / PORTS changes highlighted with colour coding |
 | **Passive detection** | Devices that send ARP traffic appear in the UI instantly without waiting for a scheduled scan |
 | **Auto-detect** | Interface and subnet shown in the header |
-| **PWA** | Installable on Android home screen, works offline (cached shell) |
+| **Authentication** | Email/password accounts + Google and GitHub OAuth; session persists via HttpOnly cookie and localStorage bearer token |
+| **PWA** | Installable on Android home screen; service worker disabled to avoid intercepting OAuth redirects |
 
 ---
 
@@ -132,37 +137,55 @@ All options are set via environment variables.
 
 ## REST API
 
-The Go server exposes a small API used by the UI. You can also call it directly.
+The Go server exposes a small API used by the UI. You can also call it directly. All endpoints except the auth ones require a valid session (pass `Authorization: Bearer <token>` or the `ding_session` cookie).
 
 ```bash
-# Current status (interface, subnet, last scan time)
-curl http://localhost:8081/api/status
+TOKEN="your-session-token"
 
-# Latest device list (with hostnames, vendor, device type, OS, ports)
-curl http://localhost:8081/api/devices
+# Current status (interface, subnet, last scan time)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/status
+
+# Latest device list (IP, MAC, hostname, vendor, type, OS, ports, notify flag)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices
 
 # Per-device scan history (last 100 scans, oldest first)
-curl http://localhost:8081/api/devices/192.168.1.42/history
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/history
 
 # Scan history (last 20 full scan records)
-curl http://localhost:8081/api/history
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/history
 
 # Network topology graph (nodes + edges)
-curl http://localhost:8081/api/topology
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/topology
 
-# Trigger a scan (returns 202; results arrive via SSE)
-curl -X POST http://localhost:8081/api/scan
+# Trigger a full network scan (returns 202; results arrive via SSE)
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/scan
+
+# Scan a single device's ports immediately (returns open ports as JSON)
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/scan
+
+# Send a Wake-on-LAN magic packet to an offline device
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/wake
 
 # Set a custom name for a device
-curl -X PUT http://localhost:8081/api/devices/192.168.1.42/label \
+curl -X PUT -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/label \
      -H 'Content-Type: application/json' \
      -d '{"name":"Living Room TV"}'
 
 # Remove a custom name
-curl -X DELETE http://localhost:8081/api/devices/192.168.1.42/label
+curl -X DELETE -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/label
+
+# Enable notifications for a device (disabled by default)
+curl -X PUT -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/notify \
+     -H 'Content-Type: application/json' \
+     -d '{"enabled":true}'
+
+# Disable notifications for a device
+curl -X PUT -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/notify \
+     -H 'Content-Type: application/json' \
+     -d '{"enabled":false}'
 
 # SSE stream (real-time events)
-curl -N http://localhost:8081/api/events
+curl -N -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/events
 ```
 
 SSE event types: `connected`, `scan_start`, `scan_result`, `scan_error`, `device_seen`.
@@ -171,7 +194,9 @@ SSE event types: `connected`, `scan_start`, `scan_result`, `scan_error`, `device
 
 ## Alerts
 
-To receive a Telegram message whenever a device joins, leaves, or changes ports:
+Ding can send a Telegram message when a device joins, leaves, or changes ports. Notifications are **opt-in per device** — by default no alerts are sent for any device. Enable them by clicking the bell icon on a device card (it turns cyan when active).
+
+**Setup:**
 
 1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token.
 2. Get your chat ID (send a message to your bot, then visit `https://api.telegram.org/bot<TOKEN>/getUpdates`).
@@ -181,6 +206,10 @@ To receive a Telegram message whenever a device joins, leaves, or changes ports:
 DING_TELEGRAM_TOKEN: "123456:ABC-your-token"
 DING_TELEGRAM_CHAT_ID: "987654321"
 ```
+
+4. Open the Ding UI, go to a device card, and click the bell icon to enable alerts for that device. The bell turns cyan when enabled.
+
+Devices you don't care about (network printers, smart bulbs, etc.) stay silent by default.
 
 ---
 
