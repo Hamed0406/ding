@@ -19,6 +19,9 @@ ui/dist/
 controller/internal/api/static/*
 !controller/internal/api/static/.gitkeep
 
+# Secrets — never commit the real .env, only .env.example
+.env
+
 # Claude Code
 CLAUDE.md
 .claude/

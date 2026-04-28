@@ -11,9 +11,10 @@
 // ============================================================
 
 import { useEffect, useRef } from 'react'
+import { getToken } from '../api/client'
 import type { SseEvent } from '../types'
 
-export function useEvents(onEvent: (event: SseEvent) => void) {
+export function useEvents(onEvent: (event: SseEvent) => void, enabled = true) {
   // We store the callback in a ref so changing it doesn't restart the connection.
   // Without this, every time the parent component re-renders it would disconnect
   // and reconnect the SSE stream.
@@ -21,12 +22,17 @@ export function useEvents(onEvent: (event: SseEvent) => void) {
   onEventRef.current = onEvent
 
   useEffect(() => {
+    if (!enabled) return // don't connect when auth is not established
+
     let es: EventSource
     let retryDelay = 1000 // start with 1 second between retries
 
     function connect() {
-      // EventSource is a browser built-in that handles SSE connections
-      es = new EventSource('/api/events')
+      // EventSource cannot send custom headers, so pass the token as a query param.
+      // The server accepts ?token= for this endpoint only.
+      const tok = getToken()
+      const url = tok ? `/api/events?token=${encodeURIComponent(tok)}` : '/api/events'
+      es = new EventSource(url)
 
       es.onmessage = (e: MessageEvent) => {
         retryDelay = 1000 // reset retry delay on successful message
@@ -50,7 +56,7 @@ export function useEvents(onEvent: (event: SseEvent) => void) {
 
     connect() // open the connection when the component mounts
 
-    // Cleanup: close the SSE connection when the component unmounts
+    // Cleanup: close the SSE connection when the component unmounts or enabled changes
     return () => es?.close()
-  }, []) // empty array = run once on mount, never re-run
+  }, [enabled]) // re-run when enabled changes (login / logout)
 }

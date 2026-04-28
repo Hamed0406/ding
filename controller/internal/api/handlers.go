@@ -2,6 +2,12 @@
 // controller/internal/api/handlers.go — REST API endpoints
 //
 // Each function here handles one URL:
+//   GET    /api/auth/providers            → which OAuth providers are configured
+//   POST   /api/auth/register             → create a new account (email + password)
+//   POST   /api/auth/login                → sign in with email + password
+//   POST   /api/auth/logout               → invalidate session cookie
+//   GET    /api/auth/{provider}           → start OAuth flow (google / github)
+//   GET    /api/auth/{provider}/callback  → OAuth callback
 //   GET    /api/status                    → interface/subnet, last scan time
 //   GET    /api/devices                   → all known devices (stable registry view)
 //   GET    /api/devices/{ip}/history      → per-device scan history (last 100 scans)
@@ -26,6 +32,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/ding/ding/internal/scanner"
 	"github.com/ding/ding/internal/storage"
 	"github.com/ding/ding/internal/topology"
@@ -36,6 +44,140 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// handleAuthProviders responds to GET /api/auth/providers
+// Returns which OAuth providers are configured so the UI can show the right buttons.
+// Also returns whether any users exist (for first-run "create account" detection).
+func (s *Server) handleAuthProviders(w http.ResponseWriter, _ *http.Request) {
+	count, _ := s.users.UserCount()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"google":     s.cfg.Google.ClientID != "",
+		"github":     s.cfg.GitHub.ClientID != "",
+		"has_users":  count > 0,
+	})
+}
+
+// handleRegister responds to POST /api/auth/register
+// Body: {"email": "...", "password": "..."}
+// Creates a new account, bcrypt-hashes the password, and sets a session cookie.
+func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	body.Email = strings.TrimSpace(strings.ToLower(body.Email))
+	if body.Email == "" || body.Password == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email and password are required"})
+		return
+	}
+	if len(body.Password) < 8 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be at least 8 characters"})
+		return
+	}
+	// Check duplicate
+	existing, err := s.users.FindUserByEmail(body.Email)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if existing != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "an account with that email already exists"})
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), 12)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if _, err := s.users.CreateUser(body.Email, string(hash)); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create account"})
+		return
+	}
+	tok := s.createSession(w, r)
+	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "token": tok})
+}
+
+// handleLogin responds to POST /api/auth/login
+// Body: {"email": "...", "password": "..."}
+// Verifies bcrypt hash and sets a session cookie on success.
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	body.Email = strings.TrimSpace(strings.ToLower(body.Email))
+	user, err := s.users.FindUserByEmail(body.Email)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if user == nil || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(body.Password)) != nil {
+		time.Sleep(500 * time.Millisecond) // slow brute-force
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "incorrect email or password"})
+		return
+	}
+	tok := s.createSession(w, r)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token": tok})
+}
+
+// handleExchange responds to POST /api/auth/exchange
+// Consumes a one-time exchange token (set in the URL by the OAuth callback) and
+// sets a session cookie. This indirection exists because Cloudflare Tunnel strips
+// Set-Cookie headers from redirect responses; a regular fetch response is unaffected.
+func (s *Server) handleExchange(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Token == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "token required"})
+		return
+	}
+	if !s.consumeExchangeToken(body.Token) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired token"})
+		return
+	}
+	tok := s.createSession(w, r)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token": tok})
+}
+
+// handleLogout responds to POST /api/auth/logout
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if tok := s.sessionToken(r); tok != "" {
+		s.sessions.delete(tok)
+	}
+	http.SetCookie(w, &http.Cookie{Name: "ding_session", Value: "", Path: "/", MaxAge: -1})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// createSession creates a session token, sets the HttpOnly cookie, and returns the token
+// so callers can also include it in the JSON response body.
+// Returning it in the body lets the React app store it in localStorage and send it as
+// Authorization: Bearer — a fallback for Cloudflare Tunnel, which strips Set-Cookie
+// from certain response types before they reach the browser.
+func (s *Server) createSession(w http.ResponseWriter, r *http.Request) string {
+	w.Header().Set("Cache-Control", "no-store, private")
+	token := s.sessions.create()
+	// Set Secure flag when the request arrived over HTTPS (direct TLS or Cloudflare Tunnel).
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	http.SetCookie(w, &http.Cookie{
+		Name:     "ding_session",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   86400,
+	})
+	return token
 }
 
 // handleStatus responds to GET /api/status

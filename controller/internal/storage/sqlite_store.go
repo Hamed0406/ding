@@ -86,6 +86,23 @@ func sqliteMigrate(db *sql.DB) error {
 			updated_at DATETIME NOT NULL
 		)
 	`)
+	// User authentication tables.
+	_, _ = db.Exec(`
+		CREATE TABLE IF NOT EXISTS users (
+			id            INTEGER PRIMARY KEY AUTOINCREMENT,
+			email         TEXT UNIQUE NOT NULL,
+			password_hash TEXT NOT NULL DEFAULT '',
+			created_at    DATETIME NOT NULL
+		)
+	`)
+	_, _ = db.Exec(`
+		CREATE TABLE IF NOT EXISTS user_providers (
+			user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			provider    TEXT NOT NULL,
+			provider_id TEXT NOT NULL,
+			PRIMARY KEY (provider, provider_id)
+		)
+	`)
 	return nil
 }
 

@@ -19,10 +19,11 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { deleteDeviceLabel, fetchDevices, fetchStatus, setDeviceLabel, triggerScan } from './api/client'
+import { AuthError, deleteDeviceLabel, exchangeToken, fetchDevices, fetchStatus, logout, setDeviceLabel, triggerScan } from './api/client'
 import { ChangesFeed } from './components/ChangesFeed'
 import { DeviceGrid } from './components/DeviceGrid'
 import { DeviceHistory } from './components/DeviceHistory'
+import { LoginPage } from './components/LoginPage'
 import { ScanButton } from './components/ScanButton'
 import { StatusBar } from './components/StatusBar'
 import { TopologyMap } from './components/TopologyMap'
@@ -41,16 +42,47 @@ export default function App() {
   const [selectedDeviceIP, setSelectedDeviceIP] = useState<string | null>(null) // history view target
   const [query, setQuery] = useState('')                                        // text search
   const [statusFilter, setStatusFilter] = useState<'all' | 'online' | 'offline'>('all') // status pill
+  // null = still checking (first load), false = not authed, true = authed
+  const [authed, setAuthed] = useState<boolean | null>(null)
+  const [authError, setAuthError] = useState('')
 
   // --- Initial data load ---
-  // When the page first loads, fetch the current status and device list from the server.
+  // Fetch status + devices on mount. A 401 means auth is required — show login page.
+  const loadData = useCallback(() => {
+    Promise.all([
+      fetchStatus().then(setStatus),
+      fetchDevices().then(setDevices),
+    ])
+      .then(() => setAuthed(true))
+      .catch((err) => {
+        if (err instanceof AuthError) setAuthed(false)
+        else { setAuthed(true); console.error(err) }
+      })
+  }, [])
+
   useEffect(() => {
-    fetchStatus().then(setStatus).catch(console.error)
-    fetchDevices().then(setDevices).catch(console.error)
-  }, []) // [] means "run once when the component first appears"
+    // The OAuth callback passes the exchange token in the URL fragment (#exchange=TOKEN)
+    // so that Cloudflare Tunnel cannot strip it (fragments are browser-only, never proxied).
+    const hash = window.location.hash  // e.g. "#exchange=abc123"
+    const hashParams = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
+    const token = hashParams.get('exchange')
+    if (token) {
+      // Strip the fragment from the URL so it can't be bookmarked or replayed
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+      exchangeToken(token)
+        .then(() => loadData())
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err)
+          setAuthError('Sign-in failed: ' + msg + ' — please try again')
+          setAuthed(false)
+        })
+    } else {
+      loadData()
+    }
+  }, [loadData])
 
   // --- Real-time updates via SSE ---
-  // The server pushes these events when a scan runs (either on timer or on demand).
+  // Only connect when authenticated — closes the stream on logout automatically.
   useEvents(
     useCallback((event) => {
       if (event.type === 'scan_start') {
@@ -80,7 +112,8 @@ export default function App() {
         ])
       }
       // 'connected' events are ignored — they just confirm the SSE stream is working
-    }, []) // useCallback with [] means this function is created once and never recreated
+    }, []), // useCallback with [] means this function is created once and never recreated
+    authed === true  // only open SSE when authenticated
   )
 
   // Called when the user sets or clears a custom device name.
@@ -90,6 +123,14 @@ export default function App() {
     const req = label ? setDeviceLabel(ip, label) : deleteDeviceLabel(ip)
     req.catch(console.error)
   }, [])
+
+  const handleLogout = () => {
+    logout().catch(console.error)
+    setAuthed(false)
+    setDevices([])
+    setChanges([])
+    setStatus(null)
+  }
 
   // Called when the user clicks "Scan now"
   const handleScan = () => {
@@ -123,6 +164,12 @@ export default function App() {
     ? devices.find((d) => d.ip === selectedDeviceIP) ?? null
     : null
 
+  // Still checking auth — show blank screen to avoid flash of wrong content
+  if (authed === null) return <div className="min-h-screen bg-slate-900" />
+
+  // Not authenticated — show login page
+  if (authed === false) return <LoginPage onLogin={loadData} initialError={authError} />
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
 
@@ -134,8 +181,17 @@ export default function App() {
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 animate-pulse" />
             <h1 className="text-lg font-bold tracking-tight">Ding</h1>
           </div>
-          {/* Right side: interface, subnet, last scan time */}
-          <StatusBar status={status} />
+          {/* Right side: interface, subnet, last scan time + logout */}
+          <div className="flex items-center gap-3">
+            <StatusBar status={status} />
+            <button
+              onClick={handleLogout}
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              title="Sign out"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
 

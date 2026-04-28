@@ -7,6 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      selfDestroying: true,  // generates a SW that immediately unregisters itself
       manifest: {
         name: 'Ding Network Scanner',
         short_name: 'Ding',
@@ -18,17 +19,6 @@ export default defineConfig({
         start_url: '/',
         icons: [
           { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml' },
-        ],
-      },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,ico,webmanifest}'],
-        navigateFallback: 'index.html',
-        runtimeCaching: [
-          {
-            // Never cache API responses — always hit the network
-            urlPattern: /^\/api\//,
-            handler: 'NetworkOnly',
-          },
         ],
       },
     }),

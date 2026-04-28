@@ -142,7 +142,16 @@ func main() {
 		Subnet:    cfg.subnet,
 		Ports:     cfg.ports,
 		TimeoutMs: cfg.timeoutMs,
-	}, store, broker, scanFn)
+		BaseURL:   os.Getenv("DING_BASE_URL"),
+		Google: api.OAuthConfig{
+			ClientID:     os.Getenv("DING_GOOGLE_CLIENT_ID"),
+			ClientSecret: os.Getenv("DING_GOOGLE_CLIENT_SECRET"),
+		},
+		GitHub: api.OAuthConfig{
+			ClientID:     os.Getenv("DING_GITHUB_CLIENT_ID"),
+			ClientSecret: os.Getenv("DING_GITHUB_CLIENT_SECRET"),
+		},
+	}, store, store, broker, scanFn)
 
 	// Run one scan immediately so the UI has data as soon as you open it
 	srv.TriggerScan()

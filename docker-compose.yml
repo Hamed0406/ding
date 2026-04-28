@@ -8,18 +8,10 @@ services:
       - NET_ADMIN
     volumes:
       - ./data:/data
-    environment:
-      # Leave DING_INTERFACE and DING_SUBNET unset to auto-detect
-      # DING_INTERFACE: eth0
-      # DING_SUBNET: 192.168.1.0/24
-      DING_PORTS: "22,80,443,8080,8443"
-      DING_TIMEOUT_MS: "500"
-      DING_DATA_PATH: /data/ding.db
-      DING_HTTP_ADDR: ":8081"
-      # Scan automatically every 60 s (leave empty for on-demand only)
-      DING_SCAN_INTERVAL: "60s"
-      DING_TELEGRAM_TOKEN: ""
-      DING_TELEGRAM_CHAT_ID: ""
+    # All configuration lives in .env (copy .env.example → .env and fill in values).
+    # .env is gitignored so secrets are never committed.
+    env_file:
+      - .env
     restart: unless-stopped
     # Note: port mapping is ignored with network_mode: host.
-    # Access the UI at http://<host-ip>:8080
+    # Access the UI at http://<host-ip>:8081
