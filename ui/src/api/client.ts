@@ -150,6 +150,28 @@ export async function wakeDevice(ip: string): Promise<void> {
   if (!res.ok) throw new Error(`wakeDevice: HTTP ${res.status}`)
 }
 
+// GET /api/settings/telegram
+export const fetchTelegramSettings = () =>
+  get<{ token_set: boolean; token_preview: string; chat_id: string }>('/api/settings/telegram')
+
+// PUT /api/settings/telegram
+export async function saveTelegramSettings(token: string, chatId: string): Promise<void> {
+  const res = await send('PUT', '/api/settings/telegram', { token, chat_id: chatId })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string }
+    throw new Error(body.error ?? `save failed: HTTP ${res.status}`)
+  }
+}
+
+// POST /api/settings/telegram/test
+export async function testTelegramSettings(): Promise<void> {
+  const res = await send('POST', '/api/settings/telegram/test')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string }
+    throw new Error(body.error ?? `test failed: HTTP ${res.status}`)
+  }
+}
+
 // PUT /api/devices/{ip}/notify
 export async function setDeviceNotify(ip: string, enabled: boolean): Promise<void> {
   const res = await send('PUT', `/api/devices/${encodeURIComponent(ip)}/notify`, { enabled })

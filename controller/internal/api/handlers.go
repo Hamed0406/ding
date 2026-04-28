@@ -34,6 +34,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/ding/ding/internal/alert"
 	"github.com/ding/ding/internal/scanner"
 	"github.com/ding/ding/internal/storage"
 	"github.com/ding/ding/internal/topology"
@@ -94,11 +95,12 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
-	if _, err := s.users.CreateUser(body.Email, string(hash)); err != nil {
+	user, err := s.users.CreateUser(body.Email, string(hash))
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create account"})
 		return
 	}
-	tok := s.createSession(w, r)
+	tok := s.createSession(w, r, user.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "token": tok})
 }
 
@@ -125,7 +127,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "incorrect email or password"})
 		return
 	}
-	tok := s.createSession(w, r)
+	tok := s.createSession(w, r, user.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token": tok})
 }
 
@@ -141,11 +143,12 @@ func (s *Server) handleExchange(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "token required"})
 		return
 	}
-	if !s.consumeExchangeToken(body.Token) {
+	userID, ok := s.consumeExchangeToken(body.Token)
+	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired token"})
 		return
 	}
-	tok := s.createSession(w, r)
+	tok := s.createSession(w, r, userID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token": tok})
 }
 
@@ -158,14 +161,19 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// currentUserID returns the user ID for the authenticated request.
+func (s *Server) currentUserID(r *http.Request) int64 {
+	return s.sessions.userID(s.sessionToken(r))
+}
+
 // createSession creates a session token, sets the HttpOnly cookie, and returns the token
 // so callers can also include it in the JSON response body.
 // Returning it in the body lets the React app store it in localStorage and send it as
 // Authorization: Bearer — a fallback for Cloudflare Tunnel, which strips Set-Cookie
 // from certain response types before they reach the browser.
-func (s *Server) createSession(w http.ResponseWriter, r *http.Request) string {
+func (s *Server) createSession(w http.ResponseWriter, r *http.Request, userID int64) string {
 	w.Header().Set("Cache-Control", "no-store, private")
-	token := s.sessions.create()
+	token := s.sessions.create(userID)
 	// Set Secure flag when the request arrived over HTTPS (direct TLS or Cloudflare Tunnel).
 	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 	http.SetCookie(w, &http.Cookie{
@@ -406,6 +414,76 @@ func sendMagicPacket(mac string) error {
 	defer conn.Close()
 	_, err = conn.Write(packet[:])
 	return err
+}
+
+// handleGetTelegram responds to GET /api/settings/telegram
+// Returns the current user's Telegram bot token and chat ID (token masked for display).
+func (s *Server) handleGetTelegram(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.users.GetTelegramConfig(s.currentUserID(r))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	// Mask the token: show only the first 10 chars so the user knows it's set,
+	// without sending the full secret to the browser.
+	masked := cfg.Token
+	if len(masked) > 10 {
+		masked = masked[:10] + strings.Repeat("•", len(masked)-10)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"token_set": cfg.Token != "",
+		"token_preview": masked,
+		"chat_id":  cfg.ChatID,
+	})
+}
+
+// handleSaveTelegram responds to PUT /api/settings/telegram
+// Body: {"token": "...", "chat_id": "..."}
+// If token is an empty string the existing stored token is preserved (allows updating
+// only the chat ID without re-sending the secret).
+func (s *Server) handleSaveTelegram(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token  string `json:"token"`
+		ChatID string `json:"chat_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	userID := s.currentUserID(r)
+	token := strings.TrimSpace(body.Token)
+	chatID := strings.TrimSpace(body.ChatID)
+	// Empty token + non-empty chatID means "keep the existing token, only update chat ID".
+	// Empty token + empty chatID means "clear everything".
+	if token == "" && chatID != "" {
+		if existing, err := s.users.GetTelegramConfig(userID); err == nil {
+			token = existing.Token
+		}
+	}
+	if err := s.users.SaveTelegramConfig(userID, token, chatID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save settings"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleTestTelegram responds to POST /api/settings/telegram/test
+// Sends a test message using the current user's saved Telegram config.
+func (s *Server) handleTestTelegram(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.users.GetTelegramConfig(s.currentUserID(r))
+	if err != nil || cfg.Token == "" || cfg.ChatID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no Telegram config saved — save your token and chat ID first"})
+		return
+	}
+	testChange := []struct {
+		s string
+	}{{s: "test"}}
+	_ = testChange
+	if err := alert.SendTest(alert.Config{TelegramToken: cfg.Token, TelegramChatID: cfg.ChatID}); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "test message sent"})
 }
 
 // handleTopology responds to GET /api/topology

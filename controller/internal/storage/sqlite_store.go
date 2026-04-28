@@ -86,6 +86,8 @@ func sqliteMigrate(db *sql.DB) error {
 			updated_at DATETIME NOT NULL
 		)
 	`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN telegram_token   TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN telegram_chat_id TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`
 		CREATE TABLE IF NOT EXISTS device_notify (
 			ip      TEXT PRIMARY KEY,

@@ -125,8 +125,7 @@ func main() {
 			log.Printf("save: %v", err)
 		}
 
-		// Send Telegram alert only for devices that have notifications explicitly enabled.
-		// Notifications are opt-in: devices default to disabled until the user enables them.
+		// Build the filtered change list: only devices with notifications enabled.
 		var alertChanges []diff.Change
 		if len(changes) > 0 {
 			enabled := make(map[string]bool)
@@ -141,8 +140,16 @@ func main() {
 				}
 			}
 		}
-		if err := alert.Send(cfg.alert, alertChanges); err != nil {
-			log.Printf("alert: %v", err)
+		// Send to all users who have configured Telegram in the UI.
+		// Fall back to the env-var config if no user has set one.
+		telegramCfgs := store.GetAllTelegramConfigs()
+		if len(telegramCfgs) == 0 && cfg.alert.TelegramToken != "" {
+			telegramCfgs = []storage.TelegramConfig{{Token: cfg.alert.TelegramToken, ChatID: cfg.alert.TelegramChatID}}
+		}
+		for _, tc := range telegramCfgs {
+			if err := alert.Send(alert.Config{TelegramToken: tc.Token, TelegramChatID: tc.ChatID}, alertChanges); err != nil {
+				log.Printf("alert: %v", err)
+			}
 		}
 
 		return results, changes, nil

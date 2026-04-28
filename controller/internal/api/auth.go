@@ -106,7 +106,7 @@ func (s *Server) handleOAuthCallback(provider string) http.HandlerFunc {
 		}
 		log.Printf("OAuth (%s): user id=%d authenticated", provider, user.ID)
 
-		exchangeTok := s.newExchangeToken()
+		exchangeTok := s.newExchangeToken(user.ID)
 		// Use the URL fragment (#exchange=TOKEN) instead of a query parameter.
 		// Cloudflare Tunnel strips query parameters from redirect Location headers,
 		// but fragments are browser-only — they are never sent to or modified by any proxy.

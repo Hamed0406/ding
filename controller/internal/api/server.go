@@ -66,33 +66,46 @@ type sseEvent struct {
 	Kind      diff.ChangeKind  `json:"kind,omitempty"`
 }
 
+// sessionEntry holds the expiry and the ID of the user who owns the session.
+type sessionEntry struct {
+	expiry time.Time
+	userID int64
+}
+
 // sessionStore holds active login tokens (random 32-byte hex, 24h expiry).
 type sessionStore struct {
 	mu     sync.Mutex
-	tokens map[string]time.Time
+	tokens map[string]sessionEntry
 }
 
 func newSessionStore() *sessionStore {
-	return &sessionStore{tokens: make(map[string]time.Time)}
+	return &sessionStore{tokens: make(map[string]sessionEntry)}
 }
 
-func (ss *sessionStore) create() string {
+func (ss *sessionStore) create(userID int64) string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		panic("crypto/rand: " + err.Error())
 	}
 	t := hex.EncodeToString(b)
 	ss.mu.Lock()
-	ss.tokens[t] = time.Now().Add(24 * time.Hour)
+	ss.tokens[t] = sessionEntry{expiry: time.Now().Add(24 * time.Hour), userID: userID}
 	ss.mu.Unlock()
 	return t
 }
 
 func (ss *sessionStore) valid(token string) bool {
 	ss.mu.Lock()
-	exp, ok := ss.tokens[token]
+	e, ok := ss.tokens[token]
 	ss.mu.Unlock()
-	return ok && time.Now().Before(exp)
+	return ok && time.Now().Before(e.expiry)
+}
+
+func (ss *sessionStore) userID(token string) int64 {
+	ss.mu.Lock()
+	e := ss.tokens[token]
+	ss.mu.Unlock()
+	return e.userID
 }
 
 func (ss *sessionStore) delete(token string) {
@@ -180,26 +193,37 @@ func (s *Server) oauthConfig(r *http.Request, provider string) *oauth2.Config {
 	return nil
 }
 
+// exchangeEntry bundles the expiry and owner for a one-time OAuth exchange token.
+type exchangeEntry struct {
+	expiry time.Time
+	userID int64
+}
+
 // newExchangeToken creates a one-time token valid for 60 seconds.
-// The OAuth callback redirects to /?exchange=TOKEN instead of setting a cookie directly,
+// The OAuth callback redirects to /#exchange=TOKEN instead of setting a cookie directly,
 // because Cloudflare Tunnel strips Set-Cookie headers from redirect responses.
 // The React app then POSTs the token to /api/auth/exchange which sets the cookie via
 // a regular fetch response that Cloudflare does not modify.
-func (s *Server) newExchangeToken() string {
+func (s *Server) newExchangeToken(userID int64) string {
 	b := make([]byte, 16)
 	rand.Read(b) //nolint:errcheck
 	token := hex.EncodeToString(b)
-	s.exchangeTokens.Store(token, time.Now().Add(60*time.Second))
+	s.exchangeTokens.Store(token, exchangeEntry{expiry: time.Now().Add(60 * time.Second), userID: userID})
 	return token
 }
 
 // consumeExchangeToken validates and deletes an exchange token (one-time use).
-func (s *Server) consumeExchangeToken(token string) bool {
+// Returns the userID and true on success, or 0 and false if invalid/expired.
+func (s *Server) consumeExchangeToken(token string) (int64, bool) {
 	val, ok := s.exchangeTokens.LoadAndDelete(token)
 	if !ok {
-		return false
+		return 0, false
 	}
-	return time.Now().Before(val.(time.Time))
+	e := val.(exchangeEntry)
+	if time.Now().After(e.expiry) {
+		return 0, false
+	}
+	return e.userID, true
 }
 
 // newOAuthState generates a random state token and stores it for 10 minutes.
@@ -261,6 +285,9 @@ func NewServer(cfg Config, store storage.Store, users storage.UserStore, broker 
 	s.mux.HandleFunc("PUT /api/devices/{ip}/label", s.requireAuth(s.handleSetLabel))
 	s.mux.HandleFunc("DELETE /api/devices/{ip}/label", s.requireAuth(s.handleDelLabel))
 	s.mux.HandleFunc("PUT /api/devices/{ip}/notify", s.requireAuth(s.handleSetNotify))
+	s.mux.HandleFunc("GET /api/settings/telegram", s.requireAuth(s.handleGetTelegram))
+	s.mux.HandleFunc("PUT /api/settings/telegram", s.requireAuth(s.handleSaveTelegram))
+	s.mux.HandleFunc("POST /api/settings/telegram/test", s.requireAuth(s.handleTestTelegram))
 	s.mux.HandleFunc("GET /api/events", s.requireAuth(s.broker.serveSSE))
 
 	// Static files — always served so the React app loads on the login page too

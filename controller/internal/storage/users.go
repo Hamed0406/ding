@@ -13,6 +13,12 @@ type User struct {
 	CreatedAt    time.Time
 }
 
+// TelegramConfig holds a user's Telegram notification credentials.
+type TelegramConfig struct {
+	Token  string
+	ChatID string
+}
+
 // UserStore is the persistence interface for user accounts.
 // *SQLiteStore implements this alongside Store.
 type UserStore interface {
@@ -28,6 +34,14 @@ type UserStore interface {
 	LinkProvider(userID int64, provider, providerID string) error
 	// UserCount returns the total number of registered users.
 	UserCount() (int, error)
+	// SaveTelegramConfig stores the Telegram bot token and chat ID for a user.
+	// Pass empty strings to clear the configuration.
+	SaveTelegramConfig(userID int64, token, chatID string) error
+	// GetTelegramConfig returns the Telegram config for a specific user.
+	GetTelegramConfig(userID int64) (TelegramConfig, error)
+	// GetAllTelegramConfigs returns the Telegram configs for every user that has
+	// configured one. Used by the alert pipeline to notify all opted-in users.
+	GetAllTelegramConfigs() []TelegramConfig
 }
 
 // CreateUser inserts a new user row and returns the created user.
@@ -95,4 +109,42 @@ func (s *SQLiteStore) UserCount() (int, error) {
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n)
 	return n, err
+}
+
+// SaveTelegramConfig stores or clears a user's Telegram bot token and chat ID.
+func (s *SQLiteStore) SaveTelegramConfig(userID int64, token, chatID string) error {
+	_, err := s.db.Exec(
+		`UPDATE users SET telegram_token = ?, telegram_chat_id = ? WHERE id = ?`,
+		token, chatID, userID,
+	)
+	return err
+}
+
+// GetTelegramConfig returns the Telegram config for the given user.
+func (s *SQLiteStore) GetTelegramConfig(userID int64) (TelegramConfig, error) {
+	var cfg TelegramConfig
+	err := s.db.QueryRow(
+		`SELECT telegram_token, telegram_chat_id FROM users WHERE id = ?`, userID,
+	).Scan(&cfg.Token, &cfg.ChatID)
+	return cfg, err
+}
+
+// GetAllTelegramConfigs returns configs for all users who have both a token and chat ID set.
+func (s *SQLiteStore) GetAllTelegramConfigs() []TelegramConfig {
+	rows, err := s.db.Query(
+		`SELECT telegram_token, telegram_chat_id FROM users
+		 WHERE telegram_token != '' AND telegram_chat_id != ''`,
+	)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var configs []TelegramConfig
+	for rows.Next() {
+		var cfg TelegramConfig
+		if err := rows.Scan(&cfg.Token, &cfg.ChatID); err == nil {
+			configs = append(configs, cfg)
+		}
+	}
+	return configs
 }
