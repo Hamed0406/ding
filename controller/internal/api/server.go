@@ -85,6 +85,7 @@ func NewServer(cfg Config, store storage.Store, broker *Broker, scanFn ScanFunc)
 	s.mux.HandleFunc("GET /api/topology", s.handleTopology)               // network topology graph
 	s.mux.HandleFunc("POST /api/scan", s.handleScan)                         // trigger a new scan
 	s.mux.HandleFunc("POST /api/devices/{ip}/scan", s.handleDeviceScan)      // targeted single-device port scan
+	s.mux.HandleFunc("POST /api/devices/{ip}/wake", s.handleWake)            // Wake-on-LAN magic packet
 	s.mux.HandleFunc("PUT /api/devices/{ip}/label", s.handleSetLabel)        // set custom device name
 	s.mux.HandleFunc("DELETE /api/devices/{ip}/label", s.handleDelLabel)     // remove custom device name
 	s.mux.HandleFunc("GET /api/events", s.broker.serveSSE)                // SSE stream

@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { Device } from '../types'
-import { scanDevice } from '../api/client'
+import { scanDevice, wakeDevice } from '../api/client'
 import { portLabel } from '../utils/ports'
 
 interface Props {
@@ -64,6 +64,9 @@ export function DeviceCard({ device, isNew, onLabelChange, onSelect }: Props) {
   const [scannedPorts, setScannedPorts] = useState<number[] | null>(null)
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState(false)
+  const [waking, setWaking] = useState(false)
+  const [wakeSent, setWakeSent] = useState(false)
+  const [wakeError, setWakeError] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   // Keep draft in sync with external label changes (e.g. from SSE) when not editing.
@@ -92,6 +95,23 @@ export function DeviceCard({ device, isNew, onLabelChange, onSelect }: Props) {
     if (e.key === 'Escape') {
       setDraft(device.label ?? '')
       setEditing(false)
+    }
+  }
+
+  const runWake = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (waking) return
+    setWaking(true)
+    setWakeError(false)
+    try {
+      await wakeDevice(device.ip)
+      setWakeSent(true)
+      setTimeout(() => setWakeSent(false), 3000)
+    } catch {
+      setWakeError(true)
+      setTimeout(() => setWakeError(false), 3000)
+    } finally {
+      setWaking(false)
     }
   }
 
@@ -250,6 +270,51 @@ export function DeviceCard({ device, isNew, onLabelChange, onSelect }: Props) {
             <span className="text-[10px] text-slate-500">
               {scannedPorts.length} port{scannedPorts.length !== 1 ? 's' : ''} open
             </span>
+          )}
+        </div>
+      )}
+
+      {/* Wake-on-LAN button — only shown for offline devices with a known MAC */}
+      {!device.alive && device.mac && (
+        <div className="pt-1 flex items-center gap-2">
+          <button
+            onClick={runWake}
+            disabled={waking}
+            className={[
+              'flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors',
+              waking
+                ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                : wakeSent
+                ? 'bg-green-900/50 text-green-400'
+                : 'bg-slate-700 hover:bg-violet-900/60 text-slate-400 hover:text-violet-300',
+            ].join(' ')}
+          >
+            {waking ? (
+              <>
+                <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                  <circle cx="12" cy="12" r="9" strokeOpacity="0.25"/>
+                  <path d="M12 3a9 9 0 0 1 9 9" strokeLinecap="round"/>
+                </svg>
+                Sending…
+              </>
+            ) : wakeSent ? (
+              <>
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                  <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"/>
+                </svg>
+                Sent!
+              </>
+            ) : (
+              <>
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                  <path fillRule="evenodd" d="M11.763 3.205A6 6 0 0 1 14 8a6 6 0 0 1-6 6 6 6 0 0 1-6-6 6 6 0 0 1 2.277-4.773.75.75 0 0 1 .963 1.149A4.5 4.5 0 0 0 3.5 8a4.5 4.5 0 0 0 4.5 4.5A4.5 4.5 0 0 0 12.5 8a4.5 4.5 0 0 0-1.719-3.556.75.75 0 0 1 .982-1.139zM8 1a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 8 1z"/>
+                </svg>
+                Wake
+              </>
+            )}
+          </button>
+          {wakeError && (
+            <span className="text-[10px] text-red-400">wake failed</span>
           )}
         </div>
       )}

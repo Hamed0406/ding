@@ -8,6 +8,7 @@
 //   GET    /api/history                   → last 20 scan records
 //   GET    /api/topology                  → network graph (nodes + edges)
 //   POST   /api/scan                      → trigger a new scan immediately
+//   POST   /api/devices/{ip}/wake         → send a Wake-on-LAN magic packet
 //   PUT    /api/devices/{ip}/label        → set a custom name for a device
 //   DELETE /api/devices/{ip}/label        → remove a custom name
 // ============================================================
@@ -198,6 +199,52 @@ func parsePorts(s string) []uint16 {
 		}
 	}
 	return ports
+}
+
+// handleWake responds to POST /api/devices/{ip}/wake
+// Looks up the device's MAC address and sends a Wake-on-LAN magic packet via UDP broadcast.
+func (s *Server) handleWake(w http.ResponseWriter, r *http.Request) {
+	ip := r.PathValue("ip")
+
+	var mac string
+	for _, d := range s.store.AllDevices() {
+		if d.IP == ip && d.MAC != nil && *d.MAC != "" {
+			mac = *d.MAC
+			break
+		}
+	}
+	if mac == "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "MAC address unknown for this device"})
+		return
+	}
+	if err := sendMagicPacket(mac); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// sendMagicPacket builds a 102-byte WoL magic packet and broadcasts it on UDP port 9.
+// Format: 6 bytes of 0xFF followed by the target MAC repeated 16 times.
+func sendMagicPacket(mac string) error {
+	hw, err := net.ParseMAC(mac)
+	if err != nil {
+		return fmt.Errorf("invalid MAC %q: %w", mac, err)
+	}
+	var packet [102]byte
+	for i := 0; i < 6; i++ {
+		packet[i] = 0xFF
+	}
+	for i := 1; i <= 16; i++ {
+		copy(packet[i*6:(i+1)*6], hw)
+	}
+	conn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: net.IPv4bcast, Port: 9})
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	_, err = conn.Write(packet[:])
+	return err
 }
 
 // handleTopology responds to GET /api/topology

@@ -60,6 +60,12 @@ export async function scanDevice(ip: string): Promise<{ ip: string; open_ports: 
   return res.json()
 }
 
+// POST /api/devices/{ip}/wake — send a Wake-on-LAN magic packet to an offline device.
+export async function wakeDevice(ip: string): Promise<void> {
+  const res = await fetch(`/api/devices/${encodeURIComponent(ip)}/wake`, { method: 'POST' })
+  if (!res.ok) throw new Error(`wakeDevice: HTTP ${res.status}`)
+}
+
 // PUT /api/devices/{ip}/label — assign a custom name to a device.
 export async function setDeviceLabel(ip: string, name: string): Promise<void> {
   const res = await fetch(`/api/devices/${encodeURIComponent(ip)}/label`, {
