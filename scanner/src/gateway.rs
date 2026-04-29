@@ -1,22 +1,30 @@
 // ============================================================
 // scanner/src/gateway.rs — Default gateway detection
 //
-// Reads /proc/net/route to find the default gateway for a given
-// network interface. The default route has destination 00000000.
-// The gateway IP is stored in hex (little-endian on x86).
-//
-// This is Linux-only, which matches the rest of the scanner
-// (AF_PACKET raw sockets are also Linux-only).
+// On Linux: reads /proc/net/route (no extra dependencies).
+// On Windows/macOS: uses the `default-net` crate which queries
+// the OS routing table via platform-native APIs.
 // ============================================================
 
 use anyhow::Result;
-use std::fs;
 use std::net::Ipv4Addr;
 
 /// Detect the default gateway IP for the given network interface.
-/// Returns None if no default route is found for this interface.
+/// Returns None if no default route is found.
 pub fn detect(iface: &str) -> Result<Option<Ipv4Addr>> {
-    let content = fs::read_to_string("/proc/net/route")?;
+    #[cfg(target_os = "linux")]
+    return detect_linux(iface);
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = iface; // not needed — default-net returns the system default
+        return detect_cross_platform();
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn detect_linux(iface: &str) -> Result<Option<Ipv4Addr>> {
+    let content = std::fs::read_to_string("/proc/net/route")?;
 
     // Each line: Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT
     // Default route has Destination = 00000000
@@ -28,11 +36,10 @@ pub fn detect(iface: &str) -> Result<Option<Ipv4Addr>> {
         if fields[0] != iface {
             continue;
         }
-        // Default route: destination is 0.0.0.0
         if fields[1] != "00000000" {
             continue;
         }
-        // Gateway is a hex-encoded IPv4 in little-endian byte order
+        // Gateway is hex-encoded IPv4 in little-endian byte order
         if let Ok(gw_hex) = u32::from_str_radix(fields[2], 16) {
             let gw = Ipv4Addr::from(gw_hex.to_be());
             return Ok(Some(gw));
@@ -40,4 +47,16 @@ pub fn detect(iface: &str) -> Result<Option<Ipv4Addr>> {
     }
 
     Ok(None)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn detect_cross_platform() -> Result<Option<Ipv4Addr>> {
+    use std::net::IpAddr;
+    match default_net::get_default_gateway() {
+        Ok(gw) => match gw.ip_addr {
+            IpAddr::V4(v4) => Ok(Some(v4)),
+            IpAddr::V6(_) => Ok(None),
+        },
+        Err(_) => Ok(None),
+    }
 }

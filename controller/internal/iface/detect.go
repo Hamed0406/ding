@@ -64,7 +64,11 @@ func Detect() (Interface, error) {
 
 // isVirtual returns true for loopback, docker bridges, veth pairs, tunnels, etc.
 func isVirtual(name string) bool {
-	for _, prefix := range []string{"docker", "br-", "veth", "virbr", "tun", "tap", "dummy", "bond"} {
+	// Linux virtual adapter prefixes
+	linuxVirtual := []string{"docker", "br-", "veth", "virbr", "tun", "tap", "dummy", "bond"}
+	// Windows virtual adapter prefixes
+	windowsVirtual := []string{"vEthernet", "VMware", "VirtualBox", "Hyper-V", "Loopback"}
+	for _, prefix := range append(linuxVirtual, windowsVirtual...) {
 		if strings.HasPrefix(name, prefix) {
 			return true
 		}

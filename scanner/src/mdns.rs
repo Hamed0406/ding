@@ -192,20 +192,45 @@ fn instance_name(instance: &str, service_owner: &str) -> String {
 }
 
 /// Return the first IPv4 address of the named interface.
+/// Uses the same three-step lookup as arp.rs: exact name → description → private-IP fallback.
 fn iface_ipv4(name: &str) -> Option<Ipv4Addr> {
-    for iface in datalink::interfaces() {
-        if iface.name != name {
-            continue;
-        }
-        for ip in &iface.ips {
-            if let std::net::IpAddr::V4(v4) = ip.ip() {
-                if !v4.is_loopback() {
-                    return Some(v4);
-                }
+    let all = datalink::interfaces();
+
+    let iface = {
+        // 1. Exact name match.
+        if let Some(i) = all.iter().find(|i| i.name == name) {
+            Some(i.clone())
+        } else {
+            // 2. Description substring match (Windows friendly-name fallback).
+            let lower = name.to_lowercase();
+            if let Some(i) = all.iter().find(|i| i.description.to_lowercase().contains(&lower)) {
+                Some(i.clone())
+            } else {
+                // 3. First non-loopback interface with a private IPv4.
+                all.into_iter().find(|i| {
+                    !i.is_loopback()
+                        && i.ips.iter().any(|ip| {
+                            if let std::net::IpAddr::V4(v4) = ip.ip() {
+                                let o = v4.octets();
+                                o[0] == 10
+                                    || (o[0] == 172 && o[1] >= 16 && o[1] <= 31)
+                                    || (o[0] == 192 && o[1] == 168)
+                            } else {
+                                false
+                            }
+                        })
+                })
             }
         }
-    }
-    None
+    }?;
+
+    iface.ips.iter().find_map(|ip| {
+        if let std::net::IpAddr::V4(v4) = ip.ip() {
+            if !v4.is_loopback() { Some(v4) } else { None }
+        } else {
+            None
+        }
+    })
 }
 
 /// Build a minimal DNS PTR query packet for the given service type.

@@ -29,11 +29,7 @@ use crate::types::{ArpEvent, ScanResult};
 // Scan the network for all active devices by sending ARP requests.
 // Returns only devices that replied — silent devices are excluded.
 pub fn scan(iface_name: &str, hosts: &[Ipv4Addr], timeout_ms: u64) -> Result<Vec<ScanResult>> {
-    // Find the network interface object by name (e.g. "eth0")
-    let interfaces = datalink::interfaces();
-    let iface = interfaces
-        .into_iter()
-        .find(|i| i.name == iface_name)
+    let iface = find_iface(iface_name)
         .ok_or_else(|| anyhow::anyhow!("interface {} not found", iface_name))?;
 
     // Get our own IP address — we put it in the ARP request as the sender
@@ -126,10 +122,7 @@ pub fn scan(iface_name: &str, hosts: &[Ipv4Addr], timeout_ms: u64) -> Result<Vec
 // Captures both ARP requests and replies, so devices are detected the moment
 // they send any ARP packet (on connect, DHCP renewal, or gateway ping).
 pub fn listen(iface_name: &str) -> Result<()> {
-    let interfaces = datalink::interfaces();
-    let iface = interfaces
-        .into_iter()
-        .find(|i| i.name == iface_name)
+    let iface = find_iface(iface_name)
         .ok_or_else(|| anyhow::anyhow!("interface {} not found", iface_name))?;
 
     let source_mac = iface
@@ -192,6 +185,51 @@ pub fn listen(iface_name: &str) -> Result<()> {
             Err(_) => continue,
         }
     }
+}
+
+// Locate a network interface by name, with fallbacks for Windows.
+//
+// On Linux, pnet and Go's net.Interfaces() both use the same name (e.g. "eth0"),
+// so an exact match always works.
+//
+// On Windows, pnet uses GUID names (\Device\NPF_{GUID}) while Go reports the
+// friendly name ("Ethernet", "Wi-Fi"). We fall back to matching the pnet
+// description string, and finally to the first non-loopback interface with a
+// private IPv4 address (suitable for a single-NIC home network scanner).
+fn find_iface(name: &str) -> Option<pnet::datalink::NetworkInterface> {
+    let all = datalink::interfaces();
+
+    // 1. Exact name match — always works on Linux.
+    if let Some(i) = all.iter().find(|i| i.name == name) {
+        return Some(i.clone());
+    }
+
+    // 2. Case-insensitive description substring match.
+    //    On Windows, pnet description may contain the adapter's marketing name.
+    let lower = name.to_lowercase();
+    if let Some(i) = all.iter().find(|i| i.description.to_lowercase().contains(&lower)) {
+        return Some(i.clone());
+    }
+
+    // 3. Last resort: first non-loopback interface with a private IPv4.
+    //    Works for single-NIC home setups where the name mapping is opaque.
+    all.into_iter().find(|i| {
+        !i.is_loopback()
+            && i.ips.iter().any(|ip| {
+                if let std::net::IpAddr::V4(v4) = ip.ip() {
+                    is_private_v4(v4)
+                } else {
+                    false
+                }
+            })
+    })
+}
+
+fn is_private_v4(ip: Ipv4Addr) -> bool {
+    let o = ip.octets();
+    o[0] == 10
+        || (o[0] == 172 && o[1] >= 16 && o[1] <= 31)
+        || (o[0] == 192 && o[1] == 168)
 }
 
 // Build and send a single ARP request packet asking "Who has `target_ip`?"
