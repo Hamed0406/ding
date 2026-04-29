@@ -207,7 +207,10 @@ fn find_iface(name: &str) -> Option<pnet::datalink::NetworkInterface> {
     // 2. Case-insensitive description substring match.
     //    On Windows, pnet description may contain the adapter's marketing name.
     let lower = name.to_lowercase();
-    if let Some(i) = all.iter().find(|i| i.description.to_lowercase().contains(&lower)) {
+    if let Some(i) = all
+        .iter()
+        .find(|i| i.description.to_lowercase().contains(&lower))
+    {
         return Some(i.clone());
     }
 
@@ -227,9 +230,7 @@ fn find_iface(name: &str) -> Option<pnet::datalink::NetworkInterface> {
 
 fn is_private_v4(ip: Ipv4Addr) -> bool {
     let o = ip.octets();
-    o[0] == 10
-        || (o[0] == 172 && o[1] >= 16 && o[1] <= 31)
-        || (o[0] == 192 && o[1] == 168)
+    o[0] == 10 || (o[0] == 172 && o[1] >= 16 && o[1] <= 31) || (o[0] == 192 && o[1] == 168)
 }
 
 // Build and send a single ARP request packet asking "Who has `target_ip`?"

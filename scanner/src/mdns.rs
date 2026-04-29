@@ -203,7 +203,10 @@ fn iface_ipv4(name: &str) -> Option<Ipv4Addr> {
         } else {
             // 2. Description substring match (Windows friendly-name fallback).
             let lower = name.to_lowercase();
-            if let Some(i) = all.iter().find(|i| i.description.to_lowercase().contains(&lower)) {
+            if let Some(i) = all
+                .iter()
+                .find(|i| i.description.to_lowercase().contains(&lower))
+            {
                 Some(i.clone())
             } else {
                 // 3. First non-loopback interface with a private IPv4.
@@ -226,7 +229,11 @@ fn iface_ipv4(name: &str) -> Option<Ipv4Addr> {
 
     iface.ips.iter().find_map(|ip| {
         if let std::net::IpAddr::V4(v4) = ip.ip() {
-            if !v4.is_loopback() { Some(v4) } else { None }
+            if !v4.is_loopback() {
+                Some(v4)
+            } else {
+                None
+            }
         } else {
             None
         }
