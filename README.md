@@ -2,22 +2,17 @@
 
 A fast network scanner that answers: who is on your network, what are they, and what ports are open.
 
-**Architecture:** Rust handles low-level scanning (ARP, ICMP, TCP, mDNS). Go handles orchestration, enrichment, change detection, alerting, storage, and serves the web UI. Docker ships everything — no host dependencies required.
+**Architecture:** Rust handles low-level scanning (ARP, ICMP, TCP, mDNS). Go handles orchestration, enrichment, change detection, alerting, storage, and serves the web UI. The two communicate via JSON over stdout — no FFI, no shared memory.
 
 ---
 
-## Requirements
+## Install
 
-- Docker + Docker Compose (Linux host only — ARP scanning requires `AF_PACKET` raw sockets)
-- `NET_RAW` / `NET_ADMIN` capabilities (granted automatically via compose)
+### Docker (recommended — Linux host)
 
----
+Pre-built images are published to **[hamed0406/ding](https://hub.docker.com/r/hamed0406/ding)** and **[ghcr.io/hamed0406/ding](https://github.com/hamed0406/ding/pkgs/container/ding)** for both `linux/amd64` and `linux/arm64` (Raspberry Pi-friendly). No source checkout needed.
 
-## Install from Docker Hub
-
-Pre-built images are published to **[hamed0406/ding](https://hub.docker.com/r/hamed0406/ding)** for both `linux/amd64` and `linux/arm64` (Raspberry Pi-friendly). No source checkout needed.
-
-### One-liner
+**One-liner:**
 
 ```bash
 docker run -d \
@@ -28,9 +23,7 @@ docker run -d \
   hamed0406/ding:latest
 ```
 
-Then open **http://\<host-ip\>:8081**.
-
-### docker-compose (recommended)
+**docker-compose (recommended):**
 
 Save this as `docker-compose.yml`:
 
@@ -45,17 +38,11 @@ services:
     volumes:
       - ./data:/data
     environment:
-      # Leave DING_INTERFACE / DING_SUBNET unset to auto-detect
       DING_PORTS: "22,80,443,554,8000,8080,8443"
       DING_HTTP_ADDR: ":8081"
       DING_SCAN_INTERVAL: "60s"
-      # Optional Telegram alerts:
-      # DING_TELEGRAM_TOKEN: "..."
-      # DING_TELEGRAM_CHAT_ID: "..."
     restart: unless-stopped
 ```
-
-Then:
 
 ```bash
 docker compose up -d                            # start
@@ -64,27 +51,68 @@ docker compose pull && docker compose up -d     # upgrade to newest :latest
 docker compose down                             # stop
 ```
 
-### Picking a tag
+**Podman:**
 
-`hamed0406/ding` is one repository — the tags are just labels pointing at builds.
+```bash
+# Option A — podman-compose (same workflow as Docker)
+pip install podman-compose
+sudo podman-compose up --build
 
-| Tag | When to use it |
+# Option B — Quadlet (systemd service)
+sudo podman build -t ding .
+# Place ding.container in /etc/containers/systemd/ — see docs/quadlet below
+sudo systemctl daemon-reload && sudo systemctl enable --now ding
+```
+
+> **Note:** Docker/Podman on Windows runs inside a Linux VM. `network_mode: host` gives the VM's virtual NIC, not your real LAN — ARP scanning won't find your devices. Use native binaries on Windows instead.
+
+---
+
+### Native binaries (Linux, macOS, Windows)
+
+Download the latest release from the [GitHub Releases](../../releases/latest) page. Each archive contains two binaries: `scanner` (Rust) and `ding` (Go controller with UI embedded).
+
+| Platform | File | Notes |
+|---|---|---|
+| Linux x86\_64 | `ding-linux-amd64.tar.gz` | |
+| Linux ARM64 | `ding-linux-arm64.tar.gz` | Raspberry Pi, NAS |
+| macOS Intel | `ding-macos-amd64.tar.gz` | Needs `sudo` |
+| macOS Apple Silicon | `ding-macos-arm64.tar.gz` | Needs `sudo` |
+| Windows x86\_64 | `ding-windows-amd64.zip` | Requires [Npcap](https://npcap.com) + run as Administrator |
+
+**Linux / macOS:**
+
+```bash
+tar xzf ding-linux-amd64.tar.gz
+sudo ./ding
+# UI at http://localhost:8081
+```
+
+**Windows:**
+
+1. Install [Npcap](https://npcap.com) (free)
+2. Unzip `ding-windows-amd64.zip`
+3. Run `ding.exe` as Administrator
+
+**Verify download integrity:**
+
+```bash
+sha256sum -c sha256sums.txt
+```
+
+---
+
+### Picking an image tag
+
+| Tag | When to use |
 |---|---|
 | `1.2.3` | **Production.** Pinned, immutable, no surprise upgrades. |
 | `1.2` | Latest patch of `1.2.x` — auto-upgrades on bug fixes |
-| `1`   | Latest `1.x.x` release |
+| `1` | Latest `1.x.x` release |
 | `latest` | Demos. Moves under you — not for production. |
 | `main-<sha>` | Bleeding-edge build from `main`. Unstable. |
 
-A single tag is multi-arch — Docker picks `amd64` or `arm64` for you automatically.
-
-### Find your interface and subnet (only if auto-detect picks the wrong one)
-
-```bash
-ip -4 addr show
-```
-
-Then set `DING_INTERFACE` and `DING_SUBNET` in the compose file.
+A single Docker tag is multi-arch — Docker picks `amd64` or `arm64` automatically.
 
 ---
 
@@ -96,29 +124,24 @@ The UI is a React PWA bundled into the Go binary. It works in any browser and is
 |---|---|
 | **Scan now** | Trigger an on-demand scan; results appear in real time via SSE |
 | **Device grid** | All discovered devices — IP, MAC, hostname, vendor, device type, OS, open ports, alive status |
-| **Search & filter** | Filter devices by name, IP, vendor, OS, or type; filter by online/offline status |
+| **Search & filter** | Filter by name, IP, vendor, OS, or type; filter by online/offline status |
 | **Device history** | Click any device card to open a full-page history view — dot timeline, uptime %, scan log with port-change markers |
-| **Device labelling** | Assign a custom name to any device ("Living Room TV") that persists across scans |
-| **Per-device port scan** | Scan an individual device's ports on demand from its card — no full network scan needed |
-| **Wake-on-LAN** | Send a magic packet to wake an offline device (requires known MAC address) |
-| **Notification opt-in** | Bell icon on each card — notifications are off by default; click to enable alerts for specific devices only |
-| **Hostnames** | Reverse-DNS lookup runs in parallel after every scan (best-effort, 300 ms per host) |
-| **MAC vendor** | Manufacturer name looked up from the embedded IEEE OUI database (no account needed) |
-| **Device type** | Device category guessed from vendor + ports + HTTP banner + RTSP + mDNS (50+ rules) |
-| **OS detection** | OS family inferred from TTL, hostname patterns, and device type (Linux, Windows, macOS, iOS, Android) |
-| **Port names** | Port numbers shown as service names — `SSH/22`, `HTTPS/443`, `RTSP/554`, etc. |
+| **Device labelling** | Assign a custom name ("Living Room TV") that persists across scans |
+| **Per-device port scan** | Scan one device's ports on demand — no full network scan needed |
+| **Wake-on-LAN** | Send a magic packet to wake an offline device (requires known MAC) |
+| **Notification opt-in** | Bell icon on each card — off by default; click to enable alerts per device |
 | **Topology map** | Interactive SVG star-topology map; switch between Grid and Topology views |
-| **Changes feed** | NEW / GONE / BACK / PORTS changes highlighted with colour coding |
-| **Passive detection** | Devices that send ARP traffic appear in the UI instantly without waiting for a scheduled scan |
-| **Auto-detect** | Interface and subnet shown in the header |
-| **Authentication** | Email/password accounts + Google and GitHub OAuth; session persists via HttpOnly cookie and localStorage bearer token |
-| **PWA** | Installable on Android home screen; service worker disabled to avoid intercepting OAuth redirects |
+| **Changes feed** | NEW / GONE / BACK / PORTS changes with colour coding |
+| **Passive detection** | Devices that send ARP traffic appear instantly without waiting for a scan |
+| **Authentication** | Email/password + Google and GitHub OAuth; session persists via HttpOnly cookie and bearer token |
+| **Telegram settings** | Each user stores their own Telegram bot token and chat ID in their account settings |
+| **PWA** | Installable on Android; service worker disabled to avoid intercepting OAuth redirects |
 
 ---
 
 ## Configuration
 
-All options are set via environment variables.
+All options are set via environment variables (or `.env` file when using the provided `docker-compose.yml`).
 
 | Variable | Default | Description |
 |---|---|---|
@@ -126,65 +149,57 @@ All options are set via environment variables.
 | `DING_SUBNET` | _(auto)_ | Target subnet in CIDR notation |
 | `DING_PORTS` | `22,80,443,554,8000,8080,8443` | TCP ports to probe on each host |
 | `DING_TIMEOUT_MS` | `500` | Per-host timeout in milliseconds |
-| `DING_DATA_PATH` | `/data/ding.db` | Where scan history is stored (SQLite database) |
+| `DING_DATA_PATH` | `/data/ding.db` | SQLite database path |
 | `DING_HTTP_ADDR` | `:8081` | Address the web server listens on |
 | `DING_SCAN_INTERVAL` | `60s` | Auto-scan interval (`""` = on-demand only) |
-| `DING_SCANNER_BIN` | `/usr/local/bin/scanner` | Path to Rust scanner binary |
-| `DING_TELEGRAM_TOKEN` | _(empty)_ | Telegram bot token for alerts |
-| `DING_TELEGRAM_CHAT_ID` | _(empty)_ | Telegram chat or channel ID |
+| `DING_SCANNER_BIN` | `/usr/local/bin/scanner` | Path to the Rust scanner binary |
+| `DING_TELEGRAM_TOKEN` | _(empty)_ | Global fallback Telegram bot token |
+| `DING_TELEGRAM_CHAT_ID` | _(empty)_ | Global fallback Telegram chat ID |
+| `DING_BASE_URL` | _(empty)_ | Public URL — required behind a reverse proxy for OAuth |
+| `DING_GOOGLE_CLIENT_ID` | _(empty)_ | Google OAuth client ID |
+| `DING_GOOGLE_CLIENT_SECRET` | _(empty)_ | Google OAuth client secret |
+| `DING_GITHUB_CLIENT_ID` | _(empty)_ | GitHub OAuth client ID |
+| `DING_GITHUB_CLIENT_SECRET` | _(empty)_ | GitHub OAuth client secret |
 
 ---
 
 ## REST API
 
-The Go server exposes a small API used by the UI. You can also call it directly. All endpoints except the auth ones require a valid session (pass `Authorization: Bearer <token>` or the `ding_session` cookie).
+All endpoints except the auth ones require a valid session (`Authorization: Bearer <token>` header or `ding_session` cookie).
 
 ```bash
 TOKEN="your-session-token"
 
-# Current status (interface, subnet, last scan time)
+# Status
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/status
 
-# Latest device list (IP, MAC, hostname, vendor, type, OS, ports, notify flag)
+# Device list
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices
 
-# Per-device scan history (last 100 scans, oldest first)
+# Per-device scan history
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/history
 
-# Scan history (last 20 full scan records)
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/history
-
-# Network topology graph (nodes + edges)
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/topology
-
-# Trigger a full network scan (returns 202; results arrive via SSE)
+# Trigger full scan
 curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/scan
 
-# Scan a single device's ports immediately (returns open ports as JSON)
+# Scan one device's ports
 curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/scan
 
-# Send a Wake-on-LAN magic packet to an offline device
+# Wake-on-LAN
 curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/wake
 
-# Set a custom name for a device
+# Set custom name
 curl -X PUT -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/label \
-     -H 'Content-Type: application/json' \
-     -d '{"name":"Living Room TV"}'
+     -H 'Content-Type: application/json' -d '{"name":"Living Room TV"}'
 
-# Remove a custom name
+# Remove custom name
 curl -X DELETE -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/label
 
-# Enable notifications for a device (disabled by default)
+# Enable notifications for a device
 curl -X PUT -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/notify \
-     -H 'Content-Type: application/json' \
-     -d '{"enabled":true}'
+     -H 'Content-Type: application/json' -d '{"enabled":true}'
 
-# Disable notifications for a device
-curl -X PUT -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/192.168.1.42/notify \
-     -H 'Content-Type: application/json' \
-     -d '{"enabled":false}'
-
-# SSE stream (real-time events)
+# SSE stream
 curl -N -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/events
 ```
 
@@ -194,30 +209,20 @@ SSE event types: `connected`, `scan_start`, `scan_result`, `scan_error`, `device
 
 ## Alerts
 
-Ding can send a Telegram message when a device joins, leaves, or changes ports. Notifications are **opt-in per device** — by default no alerts are sent for any device. Enable them by clicking the bell icon on a device card (it turns cyan when active).
+Ding sends Telegram messages when a device joins, leaves, or changes ports. Notifications are **opt-in per device** — disabled by default. Enable them by clicking the bell icon on a device card (turns cyan when active).
+
+**Two ways to configure Telegram:**
+
+1. **Per-user (recommended):** Log in → gear icon → Settings → Notifications. Each user's token and chat ID are stored in their account in the database.
+
+2. **Global fallback:** Set `DING_TELEGRAM_TOKEN` and `DING_TELEGRAM_CHAT_ID` environment variables. Used when no per-user config exists.
 
 **Setup:**
 
-1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token.
-2. Get your chat ID (send a message to your bot, then visit `https://api.telegram.org/bot<TOKEN>/getUpdates`).
-3. Set the env vars in `docker-compose.yml`:
-
-```yaml
-DING_TELEGRAM_TOKEN: "123456:ABC-your-token"
-DING_TELEGRAM_CHAT_ID: "987654321"
-```
-
-4. Open the Ding UI, go to a device card, and click the bell icon to enable alerts for that device. The bell turns cyan when enabled.
-
-Devices you don't care about (network printers, smart bulbs, etc.) stay silent by default.
-
----
-
-## Scan data
-
-Results are stored in `./data/ding.db` (SQLite, mounted into the container). The database uses a normalized schema — one row per device per scan — which enables per-device history queries. No external database service is needed; the SQLite engine is compiled into the binary.
-
-If you are upgrading from an older version that used `ding.json`, update `DING_DATA_PATH` in your compose file and the old JSON file can be left in place or deleted — it will not be read.
+1. Create a bot via [@BotFather](https://t.me/BotFather) on Telegram and copy the token.
+2. Get your chat ID from [@userinfobot](https://t.me/userinfobot).
+3. Enter them in Settings → Notifications and click **Send test message** to confirm.
+4. Enable the bell icon on each device you want to track.
 
 ---
 
@@ -248,7 +253,7 @@ Go controller (ding)
   ├── diffs results         → NEW / BACK / GONE / PORTS changes
   ├── saves to /data/ding.db (SQLite)
   ├── pushes scan events to all SSE clients
-  └── sends Telegram alert (if configured)
+  └── sends Telegram alert (if any device has notify enabled)
 
 Passive ARP listener (always running)
   └── watches ARP traffic → device_seen SSE events without waiting for scan
@@ -258,91 +263,101 @@ Passive ARP listener (always running)
 
 ## Building from source
 
-### Build with Docker (recommended)
+### Docker (recommended)
 
 The multi-stage Dockerfile builds everything inside containers — no host toolchains needed.
 
 ```bash
-docker compose build           # builds UI, Rust scanner, Go controller
-docker compose up              # start (foreground)
-docker compose up -d           # start (detached)
-docker compose up --build      # rebuild + start in one shot
-docker compose down            # stop and remove the container
-docker compose logs -f         # tail logs
+docker compose build
+docker compose up -d
+docker compose up --build   # rebuild + start in one shot
+docker compose logs -f
 ```
 
-The build is layer-cached: changing only Go code reuses the UI and Rust stages, and vice versa.
-
-### Run locally for development
-
-Useful when iterating on a single component (UI hot-reload, Rust logging, Go debugging).
+### Local development
 
 **Prerequisites**
 
 | Toolchain | Version | Used for |
 |---|---|---|
-| Rust | 1.70+ (stable) | `scanner/` |
+| Rust | stable | `scanner/` |
 | Go | 1.25+ | `controller/` |
-| Node | 22+ (with npm) | `ui/` |
+| Node | 22+ | `ui/` |
+| Npcap SDK | any | Windows only — needed to `cargo build` on Windows |
 
-You also need `sudo` (or `CAP_NET_RAW` + `CAP_NET_ADMIN`) to run the scanner — ARP and ICMP need raw sockets.
+Raw sockets require elevated privileges: `sudo` on Linux/macOS, Administrator on Windows.
 
 **1. Build the Rust scanner**
 
 ```bash
 cd scanner
-cargo build --release          # output: target/release/scanner
-cargo test                     # optional
+cargo build --release
 ```
 
-Quick standalone smoke test (replace `eth0` and the subnet with your own):
-
+Smoke test (replace interface and subnet with yours):
 ```bash
+# Linux / macOS
 sudo ./target/release/scanner --interface eth0 --subnet 192.168.1.0/24
+# Windows (as Administrator, with Npcap installed)
+.\target\release\scanner.exe --interface "Ethernet" --subnet 192.168.1.0/24
 ```
 
 **2. Build the React UI**
 
-Two modes — pick one:
-
 ```bash
-cd ui
-npm install
+cd ui && npm install
 
-# Mode A — hot-reload dev server on :5173, proxies /api to :8081
-npm run dev
-
-# Mode B — production build (output: dist/), needed before running the Go binary standalone
-npm run build
+npm run dev    # hot-reload on :5173, proxies /api → :8081
+npm run build  # production build → dist/ (needed for the Go binary)
 ```
 
 **3. Run the Go controller**
 
 ```bash
 cd controller
-
-# go:embed needs static/ to be non-empty at compile time.
-# Copy the UI build output in (only needed if you used Mode B above).
 cp -r ../ui/dist/* ./internal/api/static/
 
-# Run the controller. Sudo is required because the spawned scanner needs raw sockets.
 sudo DING_SCANNER_BIN=../scanner/target/release/scanner \
      DING_HTTP_ADDR=:8081 \
      go run ./cmd/ding
 ```
 
-Open <http://localhost:8081>. If you're using UI Mode A (Vite), open <http://localhost:5173> instead — it proxies API calls to the Go server.
+Open <http://localhost:8081> (or <http://localhost:5173> for the Vite dev server).
 
-**Run the tests**
+**Tests**
 
 ```bash
 cd controller && go test ./...
 cd scanner    && cargo test
-cd ui         && npm run build      # type-checks via tsc
 ```
 
 **Common pitfalls**
 
-- *`pattern static: cannot embed directory static: contains no embeddable files`* — `controller/internal/api/static/` is empty. Run `npm run build` in `ui/` and copy `dist/*` in (see step 3).
-- *`interface "..." not found or has no IPv4 address`* — list interfaces with `ip -4 addr show` and pass a real one via `DING_INTERFACE`.
-- *Empty scan results* — you probably ran without `sudo`. ARP/ICMP need `CAP_NET_RAW`.
+- *`contains no embeddable files`* — `controller/internal/api/static/` is empty. Run `npm run build` and copy `dist/*` in.
+- *`interface not found`* — list interfaces with `ip -4 addr show` (Linux) or `ipconfig` (Windows) and set `DING_INTERFACE`.
+- *Empty scan results* — ran without `sudo` / Administrator. ARP/ICMP need elevated privileges.
+- *Windows build error about wpcap* — set `LIB=<npcap-sdk>\Lib\x64` before `cargo build`.
+
+---
+
+## Releasing
+
+Push a semver tag to trigger the release pipeline:
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+GitHub Actions will:
+1. Build Docker images (`linux/amd64` + `linux/arm64`) → Docker Hub + GHCR
+2. Build native binaries for Linux, macOS, and Windows (5 targets)
+3. Package archives and attach them to a GitHub Release with auto-generated changelog
+
+Tags containing `-` (e.g. `v1.2.3-rc1`) are automatically marked as pre-releases.
+
+---
+
+## Scan data
+
+Results are stored in `./data/ding.db` (SQLite). The schema is normalized — one row per device per scan — which enables per-device history queries. No external database service is needed; the SQLite engine is compiled into the binary.

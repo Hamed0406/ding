@@ -75,6 +75,7 @@ fn main() -> Result<()> {
         Mode::Listen => {
             // Passive mode: watch ARP traffic and stream events forever.
             // Go kills this process on shutdown via context cancellation.
+            // Uses pnet datalink (AF_PACKET on Linux, BPF on macOS, Npcap on Windows).
             arp::listen(&args.interface)?;
         }
 

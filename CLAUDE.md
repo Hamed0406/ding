@@ -12,7 +12,7 @@ Ding is a Fing-like network scanner. Rust handles low-level scanning (ARP, ICMP,
 scanner/                  Rust crate — standalone binary
   src/
     main.rs               CLI entry point (clap); three modes: scan, listen, mdns
-    arp.rs                ARP discovery + passive ARP listener (AF_PACKET via pnet)
+    arp.rs                ARP discovery + passive ARP listener (pnet datalink — AF_PACKET/BPF/Npcap)
     ping.rs               ICMP liveness check + TTL capture (raw ICMP socket via socket2)
     tcp.rs                TCP port scan via std::net::TcpStream::connect_timeout
     mdns.rs               mDNS/Bonjour discovery — multicast PTR queries, DNS correlation
@@ -91,10 +91,19 @@ npm run dev      # Vite dev server on :5173, proxies /api → :8080
 npm run build    # output: dist/ (copy to controller/internal/api/static/ for local Go build)
 ```
 
-### Docker — run from repo root
+### Docker / Podman — run from repo root
 ```bash
 docker compose build
-docker compose up        # requires Linux host; UI at http://localhost:8080
+docker compose up        # requires Linux host (network_mode: host); UI at http://localhost:8081
+# Podman users:
+sudo podman-compose up --build
+```
+
+### Release — cut a new version
+```bash
+git tag v1.2.3 && git push origin v1.2.3
+# GitHub Actions builds Docker (linux/amd64 + arm64) + native binaries for
+# Linux, macOS, Windows and publishes them as GitHub Release assets.
 ```
 
 ## Runtime configuration (env vars)
@@ -114,14 +123,18 @@ docker compose up        # requires Linux host; UI at http://localhost:8080
 
 ## Key constraints
 
-- **Linux only** — `arp.rs` and `mdns.rs` use raw sockets (AF_PACKET / UDP multicast).
-- **CAP_NET_RAW required** — for ARP and ICMP. In Docker: `cap_add: [NET_RAW, NET_ADMIN]` + `network_mode: host`.
-- **pnet uses AF_PACKET, not libpcap** — no libpcap needed at build or runtime.
+- **Raw socket access required** — ARP and ICMP need elevated privileges on every OS:
+  - Linux: `CAP_NET_RAW` + `CAP_NET_ADMIN`; in Docker: `cap_add: [NET_RAW, NET_ADMIN]` + `network_mode: host`
+  - macOS: `sudo` (BPF access)
+  - Windows: Administrator + [Npcap](https://npcap.com) installed
+- **pnet datalink layer** — Linux uses AF_PACKET (no libpcap needed), macOS uses BPF, Windows uses Npcap. The Rust code is the same across all three; only the runtime driver differs.
+- **Windows build requires Npcap SDK** — set `LIB=<npcap-sdk>\Lib\x64` before `cargo build`. The release pipeline downloads the SDK automatically.
+- **Docker/Podman on Windows does NOT work for scanning** — containers run inside a Linux VM; `network_mode: host` gives the VM's virtual NIC, not the real LAN. Use native binaries on Windows instead.
 - **No CGO in Go** — SQLite via `modernc.org/sqlite` (pure Go, compiles the SQLite engine in). No `gcc`, no system libs.
 - **Go 1.25+ required** — `modernc.org/sqlite v1.50+` sets this minimum in `go.mod`.
 - **Scanner speaks JSON on stdout, errors on stderr** — never mix them.
 - **go:embed requires static/ to be non-empty at compile time** — `static/.gitkeep` satisfies this locally; the Dockerfile overwrites it with the real UI build.
-- **Docker-only deployment** — 4-stage Dockerfile: Node (UI) → Rust (scanner) → Go (controller) → debian:bookworm-slim runtime.
+- **4-stage Dockerfile** — Node (UI) → Rust (scanner) → Go (controller) → debian:bookworm-slim runtime. Docker images target Linux only; native binaries for macOS and Windows are released separately via GitHub Actions.
 - **Store is an interface** — `storage.Store` in `store.go`. `SQLiteStore` is the active backend. `JSONStore` is kept but unused. Swap backends by changing one line in `main.go`.
 - **mDNS runs in parallel with ARP scan** — `scanner.Run()` and `scanner.RunMDNS()` are goroutined together so mDNS adds zero wall-clock latency.
 
@@ -158,8 +171,19 @@ main.go
 | GET | `/api/history` | Last 20 full scan records |
 | GET | `/api/topology` | Network graph (nodes + edges) |
 | POST | `/api/scan` | Trigger a new scan (202 Accepted; results via SSE) |
+| POST | `/api/devices/{ip}/scan` | Scan one device's ports immediately |
+| POST | `/api/devices/{ip}/wake` | Send Wake-on-LAN magic packet |
 | PUT | `/api/devices/{ip}/label` | Set a custom name `{"name": "Living Room TV"}` |
 | DELETE | `/api/devices/{ip}/label` | Remove a custom name |
+| PUT | `/api/devices/{ip}/notify` | Toggle per-device alerts `{"enabled": true}` |
+| GET | `/api/settings/telegram` | Get current user's Telegram config |
+| PUT | `/api/settings/telegram` | Save current user's Telegram token + chat ID |
+| POST | `/api/settings/telegram/test` | Send a test Telegram message |
+| GET | `/api/auth/providers` | Available OAuth providers (public) |
+| POST | `/api/auth/register` | Email/password registration |
+| POST | `/api/auth/login` | Email/password login |
+| POST | `/api/auth/logout` | End session |
+| POST | `/api/auth/exchange` | Consume one-time OAuth exchange token |
 | GET | `/api/events` | SSE stream (scan_start / scan_result / scan_error / device_seen) |
 
 ## Adding features
@@ -171,4 +195,4 @@ main.go
 - **New API endpoint** → add handler in `api/handlers.go`, register route in `api/server.go`.
 - **New UI component** → add under `ui/src/components/`, wire into `App.tsx`.
 - **Scheduling / daemon mode** → already implemented; tune `DING_SCAN_INTERVAL`.
-- **New storage backend** (e.g. Postgres) → implement the `storage.Store` interface (10 methods: `Save`, `Latest`, `LatestRecord`, `History`, `AllKnownIPs`, `AllDevices`, `DeviceHistory`, `SetLabel`, `DeleteLabel`, `GetLabels`), then swap `storage.NewSQLite` for your constructor in `main.go`.
+- **New storage backend** (e.g. Postgres) → implement the `storage.Store` interface (13 methods: `Save`, `Latest`, `LatestRecord`, `History`, `AllKnownIPs`, `AllDevices`, `DeviceHistory`, `SetLabel`, `DeleteLabel`, `GetLabels`, `SetNotify`, plus `UserStore` methods), then swap `storage.NewSQLite` for your constructor in `main.go`.

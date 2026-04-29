@@ -9,8 +9,11 @@
 //   2. If a device with that IP exists, it replies with its MAC.
 //   3. We collect all replies within the timeout window.
 //
-// This uses raw sockets (AF_PACKET) via the `pnet` library.
-// That's why the container needs CAP_NET_RAW permission.
+// Raw packet access is provided by the `pnet` library via the
+// platform's native datalink layer:
+//   Linux   — AF_PACKET (kernel built-in, needs CAP_NET_RAW)
+//   macOS   — BPF       (kernel built-in, needs sudo)
+//   Windows — Npcap     (user-installed driver, needs Admin)
 // ============================================================
 
 use anyhow::Result;
