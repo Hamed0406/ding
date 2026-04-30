@@ -72,6 +72,15 @@ export interface TopologyGraph {
   edges: TopologyEdge[]
 }
 
+// One internet speed test result (returned by POST /api/speedtest and GET /api/speedtest/history)
+export interface SpeedtestResult {
+  download_mbps: number   // e.g. 125.4
+  upload_mbps: number     // e.g. 35.2
+  ping_ms: number         // e.g. 12.5
+  server: string          // e.g. "speed.cloudflare.com"
+  tested_at: string       // ISO timestamp
+}
+
 // Every possible SSE event the server can push to the browser.
 // TypeScript's union type (|) means it's one of these shapes.
 export type SseEvent =

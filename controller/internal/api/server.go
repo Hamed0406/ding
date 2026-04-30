@@ -122,6 +122,7 @@ type Server struct {
 	broker         *Broker
 	scanFn         ScanFunc
 	scanning       atomic.Bool
+	speedtesting   atomic.Bool
 	mux            *http.ServeMux
 	sessions       *sessionStore
 	oauthStates    sync.Map // map[string]time.Time — short-lived CSRF state tokens
@@ -288,6 +289,8 @@ func NewServer(cfg Config, store storage.Store, users storage.UserStore, broker 
 	s.mux.HandleFunc("GET /api/settings/telegram", s.requireAuth(s.handleGetTelegram))
 	s.mux.HandleFunc("PUT /api/settings/telegram", s.requireAuth(s.handleSaveTelegram))
 	s.mux.HandleFunc("POST /api/settings/telegram/test", s.requireAuth(s.handleTestTelegram))
+	s.mux.HandleFunc("POST /api/speedtest", s.requireAuth(s.handleSpeedtest))
+	s.mux.HandleFunc("GET /api/speedtest/history", s.requireAuth(s.handleSpeedtestHistory))
 	s.mux.HandleFunc("GET /api/events", s.requireAuth(s.broker.serveSSE))
 
 	// Static files — always served so the React app loads on the login page too

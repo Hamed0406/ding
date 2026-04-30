@@ -36,6 +36,7 @@ import (
 
 	"github.com/ding/ding/internal/alert"
 	"github.com/ding/ding/internal/scanner"
+	"github.com/ding/ding/internal/speedtest"
 	"github.com/ding/ding/internal/storage"
 	"github.com/ding/ding/internal/topology"
 )
@@ -484,6 +485,45 @@ func (s *Server) handleTestTelegram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "test message sent"})
+}
+
+// handleSpeedtest responds to POST /api/speedtest
+// Runs a full speed test (ping + download + upload) against speed.cloudflare.com.
+// Takes 5–30 s; returns 409 if a test is already running.
+// Result is persisted in SQLite and returned in the response body.
+func (s *Server) handleSpeedtest(w http.ResponseWriter, _ *http.Request) {
+	if !s.speedtesting.CompareAndSwap(false, true) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "speed test already in progress"})
+		return
+	}
+	defer s.speedtesting.Store(false)
+
+	result, err := speedtest.Run()
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+
+	testedAt, _ := time.Parse(time.RFC3339, result.TestedAt)
+	_ = s.store.SaveSpeedtest(storage.SpeedtestResult{
+		TestedAt:     testedAt,
+		DownloadMbps: result.DownloadMbps,
+		UploadMbps:   result.UploadMbps,
+		PingMs:       result.PingMs,
+		Server:       result.Server,
+	})
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleSpeedtestHistory responds to GET /api/speedtest/history
+// Returns the last 20 speed test results, newest first.
+func (s *Server) handleSpeedtestHistory(w http.ResponseWriter, _ *http.Request) {
+	results := s.store.SpeedtestHistory(20)
+	if results == nil {
+		results = []storage.SpeedtestResult{}
+	}
+	writeJSON(w, http.StatusOK, results)
 }
 
 // handleTopology responds to GET /api/topology

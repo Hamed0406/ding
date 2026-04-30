@@ -111,6 +111,16 @@ func sqliteMigrate(db *sql.DB) error {
 			PRIMARY KEY (provider, provider_id)
 		)
 	`)
+	_, _ = db.Exec(`
+		CREATE TABLE IF NOT EXISTS speedtest_results (
+			id            INTEGER PRIMARY KEY AUTOINCREMENT,
+			tested_at     DATETIME NOT NULL,
+			download_mbps REAL     NOT NULL,
+			upload_mbps   REAL     NOT NULL,
+			ping_ms       REAL     NOT NULL,
+			server        TEXT     NOT NULL
+		)
+	`)
 	return nil
 }
 
@@ -414,4 +424,37 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+func (s *SQLiteStore) SaveSpeedtest(r SpeedtestResult) error {
+	_, err := s.db.Exec(`
+		INSERT INTO speedtest_results (tested_at, download_mbps, upload_mbps, ping_ms, server)
+		VALUES (?, ?, ?, ?, ?)
+	`, r.TestedAt.UTC().Format(time.RFC3339), r.DownloadMbps, r.UploadMbps, r.PingMs, r.Server)
+	return err
+}
+
+func (s *SQLiteStore) SpeedtestHistory(n int) []SpeedtestResult {
+	rows, err := s.db.Query(`
+		SELECT tested_at, download_mbps, upload_mbps, ping_ms, server
+		FROM speedtest_results
+		ORDER BY id DESC
+		LIMIT ?
+	`, n)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var results []SpeedtestResult
+	for rows.Next() {
+		var r SpeedtestResult
+		var testedAtStr string
+		if err := rows.Scan(&testedAtStr, &r.DownloadMbps, &r.UploadMbps, &r.PingMs, &r.Server); err != nil {
+			continue
+		}
+		r.TestedAt, _ = time.Parse(time.RFC3339, testedAtStr)
+		results = append(results, r)
+	}
+	return results
 }

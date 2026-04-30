@@ -36,6 +36,15 @@ type DeviceHistoryEntry struct {
 	OpenPorts []uint16  `json:"open_ports"`
 }
 
+// SpeedtestResult is one recorded internet speed test.
+type SpeedtestResult struct {
+	TestedAt     time.Time `json:"tested_at"`
+	DownloadMbps float64   `json:"download_mbps"`
+	UploadMbps   float64   `json:"upload_mbps"`
+	PingMs       float64   `json:"ping_ms"`
+	Server       string    `json:"server"`
+}
+
 // Store is the interface the rest of the application uses for persistence.
 // Swap the implementation (JSON file, SQLite, Postgres) without touching
 // any API handler or controller code — just satisfy this interface.
@@ -67,6 +76,11 @@ type Store interface {
 	// SetNotify enables or disables change alerts for the given IP address.
 	// Devices default to enabled; only a false value is stored persistently.
 	SetNotify(ip string, enabled bool) error
+
+	// SaveSpeedtest stores one speed test result.
+	SaveSpeedtest(r SpeedtestResult) error
+	// SpeedtestHistory returns the last n speed test results, newest first.
+	SpeedtestHistory(n int) []SpeedtestResult
 }
 
 // JSONStore is the legacy Store implementation: a single JSON file on disk.
@@ -212,7 +226,9 @@ func (s *JSONStore) GetLabels() map[string]string {
 	return labels
 }
 
-func (s *JSONStore) SetNotify(_ string, _ bool) error { return nil }
+func (s *JSONStore) SetNotify(_ string, _ bool) error          { return nil }
+func (s *JSONStore) SaveSpeedtest(_ SpeedtestResult) error     { return nil }
+func (s *JSONStore) SpeedtestHistory(_ int) []SpeedtestResult  { return nil }
 
 func (s *JSONStore) labelsPath() string { return s.path + ".labels" }
 

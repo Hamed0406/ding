@@ -20,7 +20,7 @@
 //   Cloudflare Tunnel strips Set-Cookie headers from certain responses.
 // ============================================================
 
-import type { Device, DeviceHistoryEntry, HistoryEntry, Status, TopologyGraph } from '../types'
+import type { Device, DeviceHistoryEntry, HistoryEntry, SpeedtestResult, Status, TopologyGraph } from '../types'
 
 // Thrown when any API call gets a 401 — lets App.tsx redirect to the login page.
 export class AuthError extends Error {
@@ -189,3 +189,17 @@ export async function deleteDeviceLabel(ip: string): Promise<void> {
   const res = await send('DELETE', `/api/devices/${encodeURIComponent(ip)}/label`)
   if (!res.ok) throw new Error(`deleteDeviceLabel: HTTP ${res.status}`)
 }
+
+// POST /api/speedtest — runs a full speed test (takes 5–30 s)
+export async function runSpeedtest(): Promise<SpeedtestResult> {
+  const res = await send('POST', '/api/speedtest')
+  if (res.status === 409) throw new Error('A speed test is already running.')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string }
+    throw new Error(body.error ?? `speedtest: HTTP ${res.status}`)
+  }
+  return res.json() as Promise<SpeedtestResult>
+}
+
+// GET /api/speedtest/history — last 20 results, newest first
+export const fetchSpeedtestHistory = () => get<SpeedtestResult[]>('/api/speedtest/history')
