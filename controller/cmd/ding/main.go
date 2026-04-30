@@ -83,6 +83,10 @@ func main() {
 		// Devices without a PTR record simply stay unnamed.
 		enrich.Hostnames(results, 16, 300*time.Millisecond)
 
+		// For devices DNS couldn't name, try NetBIOS Node Status (UDP 137).
+		// Catches Windows PCs, NAS boxes, and printers that skip PTR records.
+		enrich.NetBIOSNames(results, 16, 1*time.Second)
+
 		// Tag each device with its MAC vendor (Apple, Cisco, etc.).
 		// Pure in-memory lookup against the embedded IEEE OUI database.
 		vendor.Annotate(results)

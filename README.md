@@ -135,6 +135,7 @@ The UI is a React PWA bundled into the Go binary. It works in any browser and is
 | **Passive detection** | Devices that send ARP traffic appear instantly without waiting for a scan |
 | **Authentication** | Email/password + Google and GitHub OAuth; session persists via HttpOnly cookie and bearer token |
 | **Telegram settings** | Each user stores their own Telegram bot token and chat ID in their account settings |
+| **Speed test** | On-demand internet speed test (ping, download, upload) via Cloudflare; results saved and shown in history |
 | **PWA** | Installable on Android; service worker disabled to avoid intercepting OAuth redirects |
 
 ---
@@ -201,6 +202,12 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/
 
 # SSE stream
 curl -N -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/events
+
+# Run a speed test (takes 10–30 s)
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/speedtest
+
+# Speed test history (last 20 results)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/speedtest/history
 ```
 
 SSE event types: `connected`, `scan_start`, `scan_result`, `scan_error`, `device_seen`.
