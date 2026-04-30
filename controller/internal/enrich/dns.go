@@ -2,13 +2,15 @@
 // The Rust scanner produces IP/MAC/port/TTL data; this package turns
 // that into human-readable context. Enrichers run in pipeline order:
 //
-//  1. Hostnames  — reverse-DNS PTR lookup (16 workers, 300 ms each)
-//  2. Vendor     — MAC OUI → manufacturer name (vendor package, inline)
-//  3. Classify   — vendor + ports → device category (classify package, inline)
-//  4. BannerDeviceType — HTTP Server header + <title> fingerprinting
-//  5. RTSPDeviceType   — RTSP OPTIONS handshake on port 554
-//  6. ApplyMDNS  — overlay authoritative mDNS service-type categories
-//  7. AnnotateOS — TTL + hostname + device-type → OS family
+//  1. Hostnames        — reverse-DNS PTR lookup (16 workers, 300 ms each)
+//  2. NetBIOSNames     — NetBIOS Node Status UDP 137 for hosts DNS missed (16 workers, 1 s each)
+//  3. Vendor           — MAC OUI → manufacturer name (vendor package, inline)
+//  4. Classify         — vendor + ports → device category (classify package, inline)
+//  5. BannerDeviceType — HTTP Server header + <title> fingerprinting (8 workers, 800 ms)
+//  6. SNMPDeviceType   — SNMP sysDescr + sysName via UDP 161 (16 workers, 800 ms)
+//  7. RTSPDeviceType   — RTSP OPTIONS handshake on port 554 (8 workers, 600 ms)
+//  8. ApplyMDNS        — overlay authoritative mDNS service-type categories
+//  9. AnnotateOS       — TTL + hostname + device-type → OS family
 package enrich
 
 import (

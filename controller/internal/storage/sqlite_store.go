@@ -2,9 +2,17 @@
 // controller/internal/storage/sqlite_store.go — SQLite backend
 //
 // SQLiteStore is the active Store implementation. Schema:
-//   scans   — one row per scan run (id, scanned_at)
-//   devices — one row per device per scan (all fields + scan_id FK)
-//   device_labels — user-assigned names, keyed by IP (survives scan cycles)
+//   scans            — one row per scan run (id, scanned_at)
+//   devices          — one row per device per scan (all fields + scan_id FK)
+//   device_labels    — user-assigned names, keyed by IP (survives scan cycles)
+//   device_notify    — per-device alert opt-in flags
+//   device_seen_at   — first_seen / last_seen timestamps per IP (upserted on Save)
+//   users            — accounts: email, bcrypt hash, Telegram config, webhook URL
+//   user_providers   — OAuth provider → user_id mappings
+//   speedtest_results — historical internet speed test results
+//
+// Schema migrations are additive: sqliteMigrate() appends ALTER TABLE / CREATE TABLE
+// IF NOT EXISTS statements so existing databases upgrade automatically on startup.
 //
 // WAL mode is enabled so reads never block writes (important during scans).
 // MaxOpenConns=1 avoids "database is locked" since SQLite has one writer.
@@ -17,6 +25,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/ding/ding/internal/diff"
 	"github.com/ding/ding/internal/scanner"
 	_ "modernc.org/sqlite"
 )
@@ -88,6 +97,7 @@ func sqliteMigrate(db *sql.DB) error {
 	`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN telegram_token   TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN telegram_chat_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN webhook_url       TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`
 		CREATE TABLE IF NOT EXISTS device_notify (
 			ip      TEXT PRIMARY KEY,
@@ -121,6 +131,23 @@ func sqliteMigrate(db *sql.DB) error {
 			server        TEXT     NOT NULL
 		)
 	`)
+	_, _ = db.Exec(`
+		CREATE TABLE IF NOT EXISTS device_seen_at (
+			ip         TEXT PRIMARY KEY,
+			first_seen DATETIME NOT NULL,
+			last_seen  DATETIME NOT NULL
+		)
+	`)
+	_, _ = db.Exec(`
+		CREATE TABLE IF NOT EXISTS change_log (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			occurred_at DATETIME NOT NULL,
+			kind        TEXT     NOT NULL,
+			ip          TEXT     NOT NULL,
+			desc        TEXT     NOT NULL DEFAULT ''
+		);
+		CREATE INDEX IF NOT EXISTS idx_change_log_time ON change_log(occurred_at DESC);
+	`)
 	return nil
 }
 
@@ -149,6 +176,16 @@ func (s *SQLiteStore) Save(results []scanner.Result) error {
 	}
 	defer stmt.Close()
 
+	seenStmt, err := tx.Prepare(`
+		INSERT INTO device_seen_at (ip, first_seen, last_seen) VALUES (?, ?, ?)
+		ON CONFLICT(ip) DO UPDATE SET last_seen = excluded.last_seen
+	`)
+	if err != nil {
+		return err
+	}
+	defer seenStmt.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339)
 	for _, r := range results {
 		ports, _ := json.Marshal(r.OpenPorts)
 		if _, err := stmt.Exec(
@@ -156,6 +193,11 @@ func (s *SQLiteStore) Save(results []scanner.Result) error {
 			string(ports), boolToInt(r.Alive), r.Gateway, r.TTL,
 		); err != nil {
 			return err
+		}
+		if r.Alive {
+			if _, err := seenStmt.Exec(r.IP, now, now); err != nil {
+				return err
+			}
 		}
 	}
 	return tx.Commit()
@@ -251,10 +293,12 @@ func (s *SQLiteStore) AllDevices() []scanner.Result {
 		SELECT
 			d.ip, d.mac, d.hostname, d.vendor, d.device_type, d.os, d.open_ports,
 			CASE WHEN d.scan_id = (SELECT MAX(id) FROM scans) THEN d.alive ELSE 0 END,
-			d.gateway, d.ttl, l.name, COALESCE(n.enabled, 0) AS notify
+			d.gateway, d.ttl, l.name, COALESCE(n.enabled, 0) AS notify,
+			sa.first_seen, sa.last_seen
 		FROM devices d
-		LEFT JOIN device_labels l ON l.ip = d.ip
-		LEFT JOIN device_notify n ON n.ip = d.ip
+		LEFT JOIN device_labels  l  ON l.ip  = d.ip
+		LEFT JOIN device_notify  n  ON n.ip  = d.ip
+		LEFT JOIN device_seen_at sa ON sa.ip = d.ip
 		WHERE d.scan_id = (
 			SELECT MAX(d2.scan_id) FROM devices d2 WHERE d2.ip = d.ip
 		)
@@ -271,7 +315,8 @@ func (s *SQLiteStore) AllDevices() []scanner.Result {
 func (s *SQLiteStore) queryDevices(scanID int64) ([]scanner.Result, error) {
 	rows, err := s.db.Query(`
 		SELECT d.ip, d.mac, d.hostname, d.vendor, d.device_type, d.os, d.open_ports,
-		       d.alive, d.gateway, d.ttl, l.name, 1 AS notify
+		       d.alive, d.gateway, d.ttl, l.name, 1 AS notify,
+		       NULL AS first_seen, NULL AS last_seen
 		FROM devices d
 		LEFT JOIN device_labels l ON l.ip = d.ip
 		WHERE d.scan_id = ?
@@ -284,19 +329,23 @@ func (s *SQLiteStore) queryDevices(scanID int64) ([]scanner.Result, error) {
 }
 
 // scanDeviceRows reads scanner.Result values from an open *sql.Rows.
-// Expects columns: ip, mac, hostname, vendor, device_type, os, open_ports, alive, gateway, ttl, label, notify.
+// Expects columns: ip, mac, hostname, vendor, device_type, os, open_ports,
+//
+//	alive, gateway, ttl, label, notify, first_seen, last_seen.
 func scanDeviceRows(rows *sql.Rows) ([]scanner.Result, error) {
 	var results []scanner.Result
 	for rows.Next() {
 		var r scanner.Result
 		var mac, hostname, vendor, deviceType, os, label, gateway sql.NullString
 		var ttl sql.NullInt64
+		var firstSeenStr, lastSeenStr sql.NullString
 		var portsJSON string
 		var alive, notify int
 
 		if err := rows.Scan(
 			&r.IP, &mac, &hostname, &vendor, &deviceType, &os,
 			&portsJSON, &alive, &gateway, &ttl, &label, &notify,
+			&firstSeenStr, &lastSeenStr,
 		); err != nil {
 			continue
 		}
@@ -324,6 +373,16 @@ func scanDeviceRows(rows *sql.Rows) ([]scanner.Result, error) {
 		if ttl.Valid {
 			v := uint8(ttl.Int64)
 			r.TTL = &v
+		}
+		if firstSeenStr.Valid {
+			if t, err := time.Parse(time.RFC3339, firstSeenStr.String); err == nil {
+				r.FirstSeen = &t
+			}
+		}
+		if lastSeenStr.Valid {
+			if t, err := time.Parse(time.RFC3339, lastSeenStr.String); err == nil {
+				r.LastSeen = &t
+			}
 		}
 		r.Alive = alive != 0
 		r.Notify = notify != 0
@@ -457,4 +516,58 @@ func (s *SQLiteStore) SpeedtestHistory(n int) []SpeedtestResult {
 		results = append(results, r)
 	}
 	return results
+}
+
+// SaveChanges inserts each diff.Change into the change_log table, all stamped
+// with the same occurredAt timestamp (the scan wall-clock time).
+func (s *SQLiteStore) SaveChanges(changes []diff.Change, occurredAt time.Time) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	ts := occurredAt.UTC().Format(time.RFC3339)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	stmt, err := tx.Prepare(`INSERT INTO change_log (occurred_at, kind, ip, desc) VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, c := range changes {
+		if _, err := stmt.Exec(ts, string(c.Kind), c.IP, c.Desc); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// Changes returns the last n change-log entries, newest first.
+func (s *SQLiteStore) Changes(n int) []ChangeLogEntry {
+	rows, err := s.db.Query(`
+		SELECT occurred_at, kind, ip, desc
+		FROM change_log
+		ORDER BY id DESC
+		LIMIT ?
+	`, n)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var entries []ChangeLogEntry
+	for rows.Next() {
+		var e ChangeLogEntry
+		var occurredAtStr, kind string
+		if err := rows.Scan(&occurredAtStr, &kind, &e.IP, &e.Desc); err != nil {
+			continue
+		}
+		e.OccurredAt, _ = time.Parse(time.RFC3339, occurredAtStr)
+		e.Kind = diff.ChangeKind(kind)
+		entries = append(entries, e)
+	}
+	return entries
 }

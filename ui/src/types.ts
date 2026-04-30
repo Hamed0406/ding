@@ -18,6 +18,8 @@ export interface Device {
   notify: boolean            // true = send alerts when this device changes (default)
   open_ports: number[]     // e.g. [22, 80, 443]
   alive: boolean           // true if device responded in the most recent scan
+  first_seen?: string      // ISO timestamp of the first scan in which this device was alive
+  last_seen?: string       // ISO timestamp of the most recent scan in which this device was alive
 }
 
 // One change detected between scans (matches diff.Change in Go)
@@ -79,6 +81,14 @@ export interface SpeedtestResult {
   ping_ms: number         // e.g. 12.5
   server: string          // e.g. "speed.cloudflare.com"
   tested_at: string       // ISO timestamp
+}
+
+// One entry in the persistent change log (returned by GET /api/changes)
+export interface ChangeLogEntry {
+  occurred_at: string              // ISO timestamp
+  kind: 'NEW' | 'GONE' | 'PORTS' | 'BACK'
+  ip: string
+  desc: string
 }
 
 // Every possible SSE event the server can push to the browser.

@@ -134,7 +134,9 @@ The UI is a React PWA bundled into the Go binary. It works in any browser and is
 | **Changes feed** | NEW / GONE / BACK / PORTS changes with colour coding |
 | **Passive detection** | Devices that send ARP traffic appear instantly without waiting for a scan |
 | **Authentication** | Email/password + Google and GitHub OAuth; session persists via HttpOnly cookie and bearer token |
-| **Telegram settings** | Each user stores their own Telegram bot token and chat ID in their account settings |
+| **Telegram alerts** | Each user stores their own Telegram bot token and chat ID; alerts fire per-device when the bell is enabled |
+| **Webhook alerts** | POST a JSON payload to any URL on change events — works natively with Slack, Discord, ntfy.sh, Home Assistant |
+| **First / last seen** | Every device card shows when it was first discovered and when it last responded |
 | **Speed test** | On-demand internet speed test (ping, download, upload) via Cloudflare; results saved and shown in history |
 | **PWA** | Installable on Android; service worker disabled to avoid intercepting OAuth redirects |
 
@@ -203,6 +205,14 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/
 # SSE stream
 curl -N -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/events
 
+# Get / save webhook URL
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/settings/webhook
+curl -X PUT -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/settings/webhook \
+     -H 'Content-Type: application/json' -d '{"url":"https://hooks.slack.com/services/…"}'
+
+# Send a test webhook payload
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/settings/webhook/test
+
 # Run a speed test (takes 10–30 s)
 curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/speedtest
 
@@ -216,13 +226,14 @@ SSE event types: `connected`, `scan_start`, `scan_result`, `scan_error`, `device
 
 ## Alerts
 
-Ding sends Telegram messages when a device joins, leaves, or changes ports. Notifications are **opt-in per device** — disabled by default. Enable them by clicking the bell icon on a device card (turns cyan when active).
+Ding sends alerts when a tracked device joins, leaves, or changes ports. Notifications are **opt-in per device** — disabled by default. Enable them by clicking the bell icon on a device card (turns cyan when active).
 
-**Two ways to configure Telegram:**
+### Telegram
+
+**Two ways to configure:**
 
 1. **Per-user (recommended):** Log in → gear icon → Settings → Notifications. Each user's token and chat ID are stored in their account in the database.
-
-2. **Global fallback:** Set `DING_TELEGRAM_TOKEN` and `DING_TELEGRAM_CHAT_ID` environment variables. Used when no per-user config exists.
+2. **Global fallback:** Set `DING_TELEGRAM_TOKEN` and `DING_TELEGRAM_CHAT_ID` environment variables. Used only when no per-user config exists.
 
 **Setup:**
 
@@ -230,6 +241,26 @@ Ding sends Telegram messages when a device joins, leaves, or changes ports. Noti
 2. Get your chat ID from [@userinfobot](https://t.me/userinfobot).
 3. Enter them in Settings → Notifications and click **Send test message** to confirm.
 4. Enable the bell icon on each device you want to track.
+
+### Webhooks
+
+Settings → Webhooks → paste any HTTPS URL. Ding will POST JSON on every change event:
+
+```json
+{
+  "event": "network_change",
+  "text": "Ding network changes:\n• NEW 192.168.1.42 …",
+  "content": "…",
+  "message": "…",
+  "changes": [{ "kind": "NEW", "ip": "192.168.1.42", "desc": "…" }],
+  "timestamp": "2026-04-30T12:00:00Z"
+}
+```
+
+- **Slack** — paste your Incoming Webhook URL directly; the `text` field is picked up automatically.
+- **Discord** — append `/slack` to your Discord webhook URL for Slack-compatible mode.
+- **ntfy.sh** — use `https://ntfy.sh/your-topic`; the `message` field is used.
+- **Home Assistant / n8n / Make** — any URL; parse the full JSON.
 
 ---
 
@@ -251,6 +282,7 @@ Go controller (ding)
   ├── spawns Rust scanner in --mode mdns ────────────────────┘
   │     └── PTR queries → device service types (3 s window)
   ├── reverse-DNS lookup    → hostnames (16 workers, 300 ms per host)
+  ├── NetBIOS lookup        → hostnames for Windows / NAS / printers DNS misses (UDP 137, 16 workers)
   ├── MAC vendor lookup     → IEEE OUI database embedded in binary
   ├── device classify       → 50+ vendor + port rules → device category
   ├── HTTP banner probe     → Server header + <title> on port 80/8000/8080
@@ -258,9 +290,9 @@ Go controller (ding)
   ├── mDNS overlay          → authoritative service-type categories
   ├── OS fingerprinting     → TTL + hostname patterns + device type → OS family
   ├── diffs results         → NEW / BACK / GONE / PORTS changes
-  ├── saves to /data/ding.db (SQLite)
+  ├── saves to /data/ding.db (SQLite) + updates first/last-seen timestamps
   ├── pushes scan events to all SSE clients
-  └── sends Telegram alert (if any device has notify enabled)
+  └── sends Telegram + webhook alerts (per-user config; bell-enabled devices only)
 
 Passive ARP listener (always running)
   └── watches ARP traffic → device_seen SSE events without waiting for scan
@@ -367,4 +399,16 @@ Tags containing `-` (e.g. `v1.2.3-rc1`) are automatically marked as pre-releases
 
 ## Scan data
 
-Results are stored in `./data/ding.db` (SQLite). The schema is normalized — one row per device per scan — which enables per-device history queries. No external database service is needed; the SQLite engine is compiled into the binary.
+Results are stored in `./data/ding.db` (SQLite). Key tables:
+
+| Table | Contents |
+|---|---|
+| `scans` | One row per scan run (timestamp) |
+| `devices` | One row per device per scan — IP, MAC, hostname, ports, alive, OS, etc. |
+| `device_seen_at` | First and last seen timestamps per IP (updated on every scan) |
+| `device_labels` | User-assigned custom names — survive scan cycles |
+| `device_notify` | Per-device alert opt-in flags |
+| `users` | Accounts — email, bcrypt hash, Telegram config, webhook URL |
+| `speedtest_results` | Historical internet speed test results |
+
+Schema migrations run automatically on startup — no manual steps needed when upgrading. No external database service is required; the SQLite engine is compiled into the binary.

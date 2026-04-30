@@ -21,18 +21,20 @@ import (
 )
 
 type Result struct {
-	IP         string   `json:"ip"`
-	MAC        *string  `json:"mac"`
-	Hostname   *string  `json:"hostname"`
-	Vendor     *string  `json:"vendor"`
-	DeviceType *string  `json:"device_type,omitempty"`
-	OS         *string  `json:"os,omitempty"`          // inferred OS (Linux, Windows, macOS, iOS, Android)
-	Label      *string  `json:"label,omitempty"`       // user-assigned custom name
-	Notify     bool     `json:"notify"`                // true = send alerts for this device (user preference)
-	OpenPorts  []uint16 `json:"open_ports"`
-	Alive      bool     `json:"alive"`
-	Gateway    *string  `json:"gateway,omitempty"`
-	TTL        *uint8   `json:"ttl,omitempty"`
+	IP         string     `json:"ip"`
+	MAC        *string    `json:"mac"`
+	Hostname   *string    `json:"hostname"`
+	Vendor     *string    `json:"vendor"`
+	DeviceType *string    `json:"device_type,omitempty"`
+	OS         *string    `json:"os,omitempty"`
+	Label      *string    `json:"label,omitempty"`
+	Notify     bool       `json:"notify"`
+	OpenPorts  []uint16   `json:"open_ports"`
+	Alive      bool       `json:"alive"`
+	Gateway    *string    `json:"gateway,omitempty"`
+	TTL        *uint8     `json:"ttl,omitempty"`
+	FirstSeen  *time.Time `json:"first_seen,omitempty"` // wall-clock time this IP was first recorded alive
+	LastSeen   *time.Time `json:"last_seen,omitempty"`  // most recent scan in which the device was alive
 }
 
 // ArpEvent is emitted by the scanner in --mode listen, one JSON line per event.

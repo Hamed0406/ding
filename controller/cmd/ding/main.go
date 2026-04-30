@@ -101,6 +101,11 @@ func main() {
 		// Runs with 8 workers and a short timeout so it adds minimal latency.
 		enrich.BannerDeviceType(results, 8, 800*time.Millisecond)
 
+		// Query SNMP sysDescr + sysName (UDP 161, community "public") on devices
+		// that still have no DeviceType or Hostname. Catches routers, switches,
+		// NAS boxes, and printers that expose an SNMP agent but not HTTP/RTSP.
+		enrich.SNMPDeviceType(results, 16, 800*time.Millisecond)
+
 		// Probe RTSP on port 554 for remaining unclassified devices.
 		// Sends OPTIONS * RTSP/1.0 and marks confirmed RTSP servers as "IP Camera".
 		// Belt-and-suspenders: classify already catches 554 open → IP Camera,
@@ -129,6 +134,11 @@ func main() {
 			log.Printf("save: %v", err)
 		}
 
+		// Persist the change events so the history log survives page reloads.
+		if err := store.SaveChanges(changes, time.Now()); err != nil {
+			log.Printf("save changes: %v", err)
+		}
+
 		// Build the filtered change list: only devices with notifications enabled.
 		var alertChanges []diff.Change
 		if len(changes) > 0 {
@@ -153,6 +163,11 @@ func main() {
 		for _, tc := range telegramCfgs {
 			if err := alert.Send(alert.Config{TelegramToken: tc.Token, TelegramChatID: tc.ChatID}, alertChanges); err != nil {
 				log.Printf("alert: %v", err)
+			}
+		}
+		for _, webhookURL := range store.GetAllWebhookURLs() {
+			if err := alert.Send(alert.Config{WebhookURL: webhookURL}, alertChanges); err != nil {
+				log.Printf("alert webhook: %v", err)
 			}
 		}
 

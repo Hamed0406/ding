@@ -8,6 +8,20 @@ import type { Device } from '../types'
 import { scanDevice, wakeDevice } from '../api/client'
 import { portLabel } from '../utils/ports'
 
+function timeAgo(iso: string): string {
+  const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (sec < 60)   return `${sec}s ago`
+  const min = Math.floor(sec / 60)
+  if (min < 60)   return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24)    return `${hr}h ago`
+  const day = Math.floor(hr / 24)
+  if (day < 30)   return `${day}d ago`
+  const mo = Math.floor(day / 30)
+  if (mo < 12)    return `${mo}mo ago`
+  return `${Math.floor(mo / 12)}y ago`
+}
+
 interface Props {
   device: Device
   isNew?: boolean
@@ -356,6 +370,15 @@ export function DeviceCard({ device, isNew, onLabelChange, onNotifyChange, onSel
         <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-800 text-green-300 uppercase tracking-wider">
           new
         </span>
+      )}
+
+      {/* First seen / last seen */}
+      {(device.first_seen || device.last_seen) && (
+        <p className="text-[10px] text-slate-600 pt-0.5 leading-relaxed">
+          {device.first_seen && <>First seen {timeAgo(device.first_seen)}</>}
+          {device.first_seen && device.last_seen && <span className="mx-1">·</span>}
+          {device.last_seen && <>Last seen {timeAgo(device.last_seen)}</>}
+        </p>
       )}
     </div>
   )

@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ding/ding/internal/diff"
 	"github.com/ding/ding/internal/scanner"
 )
 
@@ -34,6 +35,14 @@ type DeviceHistoryEntry struct {
 	ScannedAt time.Time `json:"scanned_at"`
 	Alive     bool      `json:"alive"`
 	OpenPorts []uint16  `json:"open_ports"`
+}
+
+// ChangeLogEntry is one persisted network-change event.
+type ChangeLogEntry struct {
+	OccurredAt time.Time      `json:"occurred_at"`
+	Kind       diff.ChangeKind `json:"kind"`
+	IP         string         `json:"ip"`
+	Desc       string         `json:"desc"`
 }
 
 // SpeedtestResult is one recorded internet speed test.
@@ -81,6 +90,12 @@ type Store interface {
 	SaveSpeedtest(r SpeedtestResult) error
 	// SpeedtestHistory returns the last n speed test results, newest first.
 	SpeedtestHistory(n int) []SpeedtestResult
+
+	// SaveChanges persists the diff.Change events produced after a scan.
+	// occurredAt is stamped onto each entry so the log is queryable by time.
+	SaveChanges(changes []diff.Change, occurredAt time.Time) error
+	// Changes returns the last n change-log entries, newest first.
+	Changes(n int) []ChangeLogEntry
 }
 
 // JSONStore is the legacy Store implementation: a single JSON file on disk.
@@ -226,9 +241,11 @@ func (s *JSONStore) GetLabels() map[string]string {
 	return labels
 }
 
-func (s *JSONStore) SetNotify(_ string, _ bool) error          { return nil }
-func (s *JSONStore) SaveSpeedtest(_ SpeedtestResult) error     { return nil }
-func (s *JSONStore) SpeedtestHistory(_ int) []SpeedtestResult  { return nil }
+func (s *JSONStore) SetNotify(_ string, _ bool) error                              { return nil }
+func (s *JSONStore) SaveSpeedtest(_ SpeedtestResult) error                         { return nil }
+func (s *JSONStore) SpeedtestHistory(_ int) []SpeedtestResult                      { return nil }
+func (s *JSONStore) SaveChanges(_ []diff.Change, _ time.Time) error                { return nil }
+func (s *JSONStore) Changes(_ int) []ChangeLogEntry                                { return nil }
 
 func (s *JSONStore) labelsPath() string { return s.path + ".labels" }
 

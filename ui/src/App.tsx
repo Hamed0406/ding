@@ -19,7 +19,8 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AuthError, deleteDeviceLabel, exchangeToken, fetchDevices, fetchStatus, logout, setDeviceLabel, setDeviceNotify, triggerScan } from './api/client'
+import { AuthError, deleteDeviceLabel, exchangeToken, exportDevices, fetchDevices, fetchStatus, logout, setDeviceLabel, setDeviceNotify, triggerScan } from './api/client'
+import { ChangeLog } from './components/ChangeLog'
 import { ChangesFeed } from './components/ChangesFeed'
 import { DeviceGrid } from './components/DeviceGrid'
 import { DeviceHistory } from './components/DeviceHistory'
@@ -38,7 +39,7 @@ export default function App() {
   const [newIPs, setNewIPs] = useState<Set<string>>(new Set()) // IPs that are brand new (for the green badge)
   const [status, setStatus] = useState<Status | null>(null) // header info (interface, subnet, time)
   const [scanning, setScanning] = useState(false)           // true while a scan is running
-  const [view, setView] = useState<'grid' | 'topology'>('grid') // current view mode
+  const [view, setView] = useState<'grid' | 'topology' | 'events'>('grid') // current view mode
   const [scanCount, setScanCount] = useState(0)             // increments after each scan, triggers topology refresh
   const [selectedDeviceIP, setSelectedDeviceIP] = useState<string | null>(null) // history view target
   const [query, setQuery] = useState('')                                        // text search
@@ -268,11 +269,51 @@ export default function App() {
                 >
                   Topology
                 </button>
+                <button
+                  onClick={() => setView('events')}
+                  className={[
+                    'px-3 py-1 text-xs font-medium rounded-md transition-colors',
+                    view === 'events'
+                      ? 'bg-slate-700 text-slate-100'
+                      : 'text-slate-400 hover:text-slate-200',
+                  ].join(' ')}
+                >
+                  Events
+                </button>
               </div>
+              {/* Export dropdown */}
+              {devices.length > 0 && (
+                <div className="relative group">
+                  <button
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
+                    title="Export device list"
+                  >
+                    <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                      <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                      <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+                    </svg>
+                    Export
+                  </button>
+                  <div className="absolute right-0 top-full mt-1 w-32 bg-slate-800 border border-slate-700 rounded-lg shadow-lg overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20">
+                    <button
+                      onClick={() => exportDevices('csv')}
+                      className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-700 transition-colors"
+                    >
+                      CSV (.csv)
+                    </button>
+                    <button
+                      onClick={() => exportDevices('json')}
+                      className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-700 transition-colors"
+                    >
+                      JSON (.json)
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Search + filter bar — only shown in grid view */}
-            {view === 'grid' && (
+            {view === 'grid' && devices.length > 0 && (
               <div className="flex flex-wrap items-center gap-2">
                 {/* Text search input */}
                 <div className="relative flex-1 min-w-[180px]">
@@ -318,10 +359,10 @@ export default function App() {
               </div>
             )}
 
-            {/* Changes since last scan (hidden when empty) */}
-            <ChangesFeed changes={changes} />
+            {/* Changes since last scan — only shown in grid / topology views */}
+            {view !== 'events' && <ChangesFeed changes={changes} />}
 
-            {/* View: either device grid or topology map */}
+            {/* View: device grid, topology map, or persistent event log */}
             {view === 'grid' ? (
               filteredDevices.length === 0 && devices.length > 0 ? (
                 <p className="text-slate-500 text-sm text-center py-12">
@@ -336,8 +377,10 @@ export default function App() {
                   onSelect={setSelectedDeviceIP}
                 />
               )
-            ) : (
+            ) : view === 'topology' ? (
               <TopologyMap scanCount={scanCount} />
+            ) : (
+              <ChangeLog scanCount={scanCount} />
             )}
           </>
         )}

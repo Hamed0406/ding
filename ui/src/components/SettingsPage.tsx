@@ -3,14 +3,17 @@
 // Add new sections by appending to SECTIONS and adding a matching panel below.
 
 import { useEffect, useState } from 'react'
-import { fetchTelegramSettings, saveTelegramSettings, testTelegramSettings } from '../api/client'
+import {
+  fetchTelegramSettings, saveTelegramSettings, testTelegramSettings,
+  fetchWebhookSettings, saveWebhookSettings, testWebhookSettings,
+} from '../api/client'
 import { SpeedTest } from './SpeedTest'
 
 interface Props {
   onBack: () => void
 }
 
-type Section = 'notifications' | 'speedtest'
+type Section = 'notifications' | 'webhooks' | 'speedtest'
 
 const SECTIONS: { id: Section; label: string; icon: React.ReactNode }[] = [
   {
@@ -21,6 +24,17 @@ const SECTIONS: { id: Section; label: string; icon: React.ReactNode }[] = [
         strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
         <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'webhooks',
+    label: 'Webhooks',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+        strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
       </svg>
     ),
   },
@@ -86,6 +100,7 @@ export function SettingsPage({ onBack }: Props) {
         {/* Content */}
         <div className="flex-1 min-w-0">
           {active === 'notifications' && <TelegramSection />}
+          {active === 'webhooks' && <WebhookSection />}
           {active === 'speedtest' && <SpeedTest />}
         </div>
 
@@ -282,6 +297,175 @@ function TelegramSection() {
         <p><span className="text-slate-400 font-medium">2.</span> Message your new bot once, then paste your chat ID from @userinfobot.</p>
         <p><span className="text-slate-400 font-medium">3.</span> Click <span className="text-slate-300">Send test message</span> to confirm it works.</p>
         <p><span className="text-slate-400 font-medium">4.</span> Enable the bell icon on the devices you want to track.</p>
+      </div>
+
+    </div>
+  )
+}
+
+// ─── Webhook section ─────────────────────────────────────────────────────────
+
+function WebhookSection() {
+  const [url, setUrl] = useState('')
+  const [urlSet, setUrlSet] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  useEffect(() => {
+    fetchWebhookSettings()
+      .then((s) => {
+        setUrlSet(s.url_set)
+        if (s.url_set) setUrl(s.url)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleSave = async () => {
+    if (saving) return
+    setSaving(true)
+    setStatus(null)
+    try {
+      await saveWebhookSettings(url.trim())
+      setUrlSet(url.trim() !== '')
+      setEditing(false)
+      setStatus({ ok: true, msg: 'Webhook URL saved.' })
+    } catch (err) {
+      setStatus({ ok: false, msg: err instanceof Error ? err.message : 'Save failed.' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleTest = async () => {
+    if (testing) return
+    setTesting(true)
+    setStatus(null)
+    try {
+      await testWebhookSettings()
+      setStatus({ ok: true, msg: 'Test payload sent — check your endpoint.' })
+    } catch (err) {
+      setStatus({ ok: false, msg: err instanceof Error ? err.message : 'Test failed.' })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const handleClear = async () => {
+    setSaving(true)
+    setStatus(null)
+    try {
+      await saveWebhookSettings('')
+      setUrl('')
+      setUrlSet(false)
+      setEditing(false)
+      setStatus({ ok: true, msg: 'Webhook cleared.' })
+    } catch {
+      setStatus({ ok: false, msg: 'Failed to clear.' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="max-w-lg space-y-6">
+
+      <div>
+        <h2 className="text-base font-semibold text-slate-100 mb-1">Webhook Notifications</h2>
+        <p className="text-sm text-slate-400">
+          POST a JSON payload to any HTTP endpoint when a tracked device joins, leaves, or changes ports.
+          Works natively with Slack, Discord, ntfy.sh, Home Assistant, and any custom endpoint.
+        </p>
+      </div>
+
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 space-y-4">
+
+        <div className="space-y-1.5">
+          <label className="block text-xs font-medium text-slate-400 uppercase tracking-wide">
+            Webhook URL
+          </label>
+          <p className="text-xs text-slate-500">
+            Any URL that accepts an HTTP POST with a JSON body.
+          </p>
+          {urlSet && !editing ? (
+            <div className="flex items-center gap-2">
+              <span className="flex-1 font-mono text-sm text-slate-400 bg-slate-700/50 border border-slate-600 rounded-lg px-3 py-2 truncate">
+                {url}
+              </span>
+              <button
+                onClick={() => setEditing(true)}
+                className="text-xs text-cyan-500 hover:text-cyan-400 transition-colors flex-shrink-0"
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://hooks.slack.com/services/…"
+              autoComplete="off"
+              className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500 font-mono"
+            />
+          )}
+        </div>
+
+        {status && (
+          <p className={`text-sm ${status.ok ? 'text-green-400' : 'text-red-400'}`}>
+            {status.msg}
+          </p>
+        )}
+
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-5 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500 text-sm font-semibold text-white transition-colors"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button
+            onClick={handleTest}
+            disabled={testing || !urlSet}
+            title={!urlSet ? 'Save a URL first' : 'Send a test payload'}
+            className="px-5 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium text-slate-200 transition-colors"
+          >
+            {testing ? 'Sending…' : 'Send test payload'}
+          </button>
+          {urlSet && (
+            <button
+              onClick={handleClear}
+              disabled={saving}
+              className="ml-auto text-xs text-slate-500 hover:text-red-400 transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+      </div>
+
+      {/* Payload reference */}
+      <div className="space-y-3">
+        <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wide">Payload format</h3>
+        <pre className="bg-slate-800 border border-slate-700 rounded-xl p-4 text-xs text-slate-300 overflow-x-auto leading-relaxed">{`{
+  "event": "network_change",
+  "text": "Ding network changes:\\n• NEW 192.168.1.42 …",
+  "content": "…",   // same as text (Discord)
+  "message": "…",   // same as text (ntfy.sh)
+  "changes": [
+    { "kind": "NEW", "ip": "192.168.1.42", "desc": "…" }
+  ],
+  "timestamp": "2026-04-30T12:00:00Z"
+}`}</pre>
+        <div className="text-xs text-slate-500 space-y-1">
+          <p><span className="text-slate-400 font-medium">Slack:</span> paste your Incoming Webhook URL — the <code className="text-slate-300">text</code> field is picked up automatically.</p>
+          <p><span className="text-slate-400 font-medium">Discord:</span> append <code className="text-slate-300">/slack</code> to your Discord webhook URL for Slack-compatible mode.</p>
+          <p><span className="text-slate-400 font-medium">ntfy.sh:</span> use <code className="text-slate-300">https://ntfy.sh/your-topic</code> — the <code className="text-slate-300">message</code> field is used.</p>
+          <p><span className="text-slate-400 font-medium">Home Assistant / n8n:</span> any URL — parse the full JSON payload.</p>
+        </div>
       </div>
 
     </div>

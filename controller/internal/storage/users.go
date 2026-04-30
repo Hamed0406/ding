@@ -42,6 +42,14 @@ type UserStore interface {
 	// GetAllTelegramConfigs returns the Telegram configs for every user that has
 	// configured one. Used by the alert pipeline to notify all opted-in users.
 	GetAllTelegramConfigs() []TelegramConfig
+
+	// SaveWebhookURL stores (or clears) a webhook URL for a user.
+	SaveWebhookURL(userID int64, webhookURL string) error
+	// GetWebhookURL returns the webhook URL for a specific user.
+	GetWebhookURL(userID int64) (string, error)
+	// GetAllWebhookURLs returns every non-empty webhook URL across all users.
+	// Used by the alert pipeline to fire all configured webhooks.
+	GetAllWebhookURLs() []string
 }
 
 // CreateUser inserts a new user row and returns the created user.
@@ -127,6 +135,38 @@ func (s *SQLiteStore) GetTelegramConfig(userID int64) (TelegramConfig, error) {
 		`SELECT telegram_token, telegram_chat_id FROM users WHERE id = ?`, userID,
 	).Scan(&cfg.Token, &cfg.ChatID)
 	return cfg, err
+}
+
+// SaveWebhookURL stores or clears the webhook URL for the given user.
+func (s *SQLiteStore) SaveWebhookURL(userID int64, webhookURL string) error {
+	_, err := s.db.Exec(
+		`UPDATE users SET webhook_url = ? WHERE id = ?`, webhookURL, userID,
+	)
+	return err
+}
+
+// GetWebhookURL returns the webhook URL for the given user, or "" if not set.
+func (s *SQLiteStore) GetWebhookURL(userID int64) (string, error) {
+	var u string
+	err := s.db.QueryRow(`SELECT webhook_url FROM users WHERE id = ?`, userID).Scan(&u)
+	return u, err
+}
+
+// GetAllWebhookURLs returns all non-empty webhook URLs across all users.
+func (s *SQLiteStore) GetAllWebhookURLs() []string {
+	rows, err := s.db.Query(`SELECT webhook_url FROM users WHERE webhook_url != ''`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var urls []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err == nil {
+			urls = append(urls, u)
+		}
+	}
+	return urls
 }
 
 // GetAllTelegramConfigs returns configs for all users who have both a token and chat ID set.

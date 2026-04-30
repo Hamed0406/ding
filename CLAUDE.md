@@ -26,8 +26,10 @@ controller/               Go module (github.com/ding/ding)
     storage/
       store.go            Store interface + JSONStore (JSON-file fallback, kept for reference)
       sqlite_store.go     SQLiteStore — active backend (modernc.org/sqlite, pure Go, no CGO)
+      users.go            UserStore interface + SQLiteStore impl — accounts, Telegram, webhook config
     enrich/
       dns.go              Reverse-DNS lookup — 16-worker pool, 300 ms per-host timeout
+      netbios.go          NetBIOS Node Status (UDP 137) — fills hostnames DNS missed (Windows PCs, NAS, printers)
       http.go             HTTP banner fingerprinting — Server header + <title> on port 80/8000/8080
       rtsp.go             RTSP OPTIONS probe on port 554 — confirms IP cameras
       os.go               OS inference — TTL rounding + hostname patterns + device type
@@ -36,11 +38,11 @@ controller/               Go module (github.com/ding/ding)
     vendor/vendor.go      MAC vendor lookup — embedded IEEE OUI database via go:embed
     topology/topology.go  Builds node+edge graph from scan results (star topology)
     diff/diff.go          Compares []Result slices → []Change (NEW / GONE / PORTS / BACK)
-    alert/alert.go        Telegram HTTP alert (add more channels here)
+    alert/alert.go        Telegram + webhook alerts; Send() fans out to all configured channels
     iface/detect.go       Auto-detects LAN interface and subnet
     api/
       server.go           HTTP server, go:embed, SPA fallback, TriggerScan()
-      handlers.go         REST handlers (status, devices, device history, topology, scan, labels)
+      handlers.go         REST handlers (status, devices, history, topology, scan, labels, settings, speedtest)
       sse.go              SSE broker — fans out scan events to all connected clients
       static/             Populated at Docker build time from ui/dist (do not commit built files)
 
@@ -52,13 +54,14 @@ ui/                       React + TypeScript + Tailwind PWA
     hooks/useEvents.ts    SSE hook with exponential-backoff reconnect
     utils/ports.ts        Port number → service name lookup (SSH/22, HTTPS/443, etc.)
     components/
-      DeviceCard.tsx      Clickable device card — type badge, inline label editor, port pills; click → history
+      DeviceCard.tsx      Clickable device card — type badge, inline label editor, port pills, first/last-seen; click → history
       DeviceGrid.tsx      Responsive grid of DeviceCards sorted by IP
       DeviceHistory.tsx   Full-page history view — dot timeline, stats, scan log with port-change markers
       ChangesFeed.tsx     Recent changes feed (NEW / GONE / PORTS / BACK)
       TopologyMap.tsx     SVG network topology map (star layout)
       ScanButton.tsx      Scan trigger button with spinner
       StatusBar.tsx       Header bar showing interface, subnet, last scan time
+      SpeedTest.tsx       On-demand internet speed test — ping/download/upload via Cloudflare, history table
 ```
 
 ## Commands
@@ -118,8 +121,8 @@ git tag v1.2.3 && git push origin v1.2.3
 | `DING_HTTP_ADDR` | `:8081` | Web server listen address |
 | `DING_SCAN_INTERVAL` | `60s` | Auto-scan interval (`""` = on-demand only) |
 | `DING_SCANNER_BIN` | `/usr/local/bin/scanner` | Override Rust binary path |
-| `DING_TELEGRAM_TOKEN` | _(empty)_ | Telegram bot token |
-| `DING_TELEGRAM_CHAT_ID` | _(empty)_ | Telegram chat/channel ID |
+| `DING_TELEGRAM_TOKEN` | _(empty)_ | Global fallback Telegram bot token (per-user config takes precedence) |
+| `DING_TELEGRAM_CHAT_ID` | _(empty)_ | Global fallback Telegram chat/channel ID |
 
 ## Key constraints
 
@@ -147,6 +150,7 @@ main.go
     ┌── scanner.Run()        # ARP+ICMP+TCP scan, parse JSON stdout     ─┐
     └── scanner.RunMDNS()    # mDNS PTR queries, 3 s window             ─┤ parallel
     → enrich.Hostnames()        # reverse-DNS, 16 workers, 300 ms timeout  ←┘
+    → enrich.NetBIOSNames()     # NetBIOS UDP 137, fills gaps DNS misses (16 workers, 1 s)
     → vendor.Annotate()         # MAC → manufacturer (embedded OUI DB)
     → classify.Annotate()       # vendor + ports → device category (50+ rules)
     → enrich.BannerDeviceType() # HTTP banner on port 80/8000/8080 (8 workers, 800 ms)
@@ -156,8 +160,8 @@ main.go
     → store.Latest()            # read previous scan from SQLite
     → store.AllKnownIPs()       # all IPs ever seen (for NEW vs BACK detection)
     → diff.Compare()            # produce []Change (NEW / GONE / PORTS / BACK)
-    → store.Save()              # write to SQLite (scans + devices tables)
-    → alert.Send()              # Telegram if token set
+    → store.Save()              # write to SQLite; upserts device_seen_at (first/last seen)
+    → alert.Send()              # Telegram + webhooks for all configured users
     → broker.Publish()          # push SSE scan_result with store.AllDevices() registry
 ```
 
@@ -179,6 +183,11 @@ main.go
 | GET | `/api/settings/telegram` | Get current user's Telegram config |
 | PUT | `/api/settings/telegram` | Save current user's Telegram token + chat ID |
 | POST | `/api/settings/telegram/test` | Send a test Telegram message |
+| GET | `/api/settings/webhook` | Get current user's webhook URL |
+| PUT | `/api/settings/webhook` | Save current user's webhook URL |
+| POST | `/api/settings/webhook/test` | Send a test webhook payload |
+| POST | `/api/speedtest` | Run an internet speed test (blocks 5–30 s; 409 if already running) |
+| GET | `/api/speedtest/history` | Last 20 speed test results, newest first |
 | GET | `/api/auth/providers` | Available OAuth providers (public) |
 | POST | `/api/auth/register` | Email/password registration |
 | POST | `/api/auth/login` | Email/password login |
@@ -189,10 +198,13 @@ main.go
 ## Adding features
 
 - **New scan capability** (e.g. UDP) → add a file in `scanner/src/`, extend `ScanResult` in `types.rs`, add a `Run*` function in `scanner/runner.go`, call it in `main.go`.
-- **New enrichment** (e.g. NetBIOS names) → add a file in `internal/enrich/`, call it in `main.go` after the scan.
+- **New scan capability** (e.g. UDP) → add a file in `scanner/src/`, extend `ScanResult` in `types.rs`, add a `Run*` function in `scanner/runner.go`, call it in `main.go`.
+- **New enrichment** → add a file in `internal/enrich/`, call it in `main.go` after existing enrichers. See `netbios.go` as a template.
 - **New device classification rules** → edit the `portTypes` or `vendorTypes` tables in `classify/classify.go`.
-- **New alert channel** (e.g. Slack) → add to `alert/alert.go`, call from `alert.Send()`.
+- **New alert channel** (e.g. Slack native) → add a sender in `alert/alert.go`, add its config to `Config`, call from `Send()`.
 - **New API endpoint** → add handler in `api/handlers.go`, register route in `api/server.go`.
+- **New settings section** → add a panel to `SettingsPage.tsx`, add GET/PUT/test handlers + routes following the Telegram/webhook pattern.
 - **New UI component** → add under `ui/src/components/`, wire into `App.tsx`.
 - **Scheduling / daemon mode** → already implemented; tune `DING_SCAN_INTERVAL`.
-- **New storage backend** (e.g. Postgres) → implement the `storage.Store` interface (13 methods: `Save`, `Latest`, `LatestRecord`, `History`, `AllKnownIPs`, `AllDevices`, `DeviceHistory`, `SetLabel`, `DeleteLabel`, `GetLabels`, `SetNotify`, plus `UserStore` methods), then swap `storage.NewSQLite` for your constructor in `main.go`.
+- **New storage backend** (e.g. Postgres) → implement `storage.Store` (15 methods: `Save`, `Latest`, `LatestRecord`, `History`, `AllKnownIPs`, `AllDevices`, `DeviceHistory`, `SetLabel`, `DeleteLabel`, `GetLabels`, `SetNotify`, `SaveSpeedtest`, `SpeedtestHistory`) and `storage.UserStore` (9 methods: `CreateUser`, `FindUserByEmail`, `FindUserByProvider`, `LinkProvider`, `UserCount`, `SaveTelegramConfig`, `GetTelegramConfig`, `GetAllTelegramConfigs`, `SaveWebhookURL`, `GetWebhookURL`, `GetAllWebhookURLs`), then swap `storage.NewSQLite` for your constructor in `main.go`.
+- **SQLite schema migrations** → append `_, _ = db.Exec(...)` calls to `sqliteMigrate()` in `sqlite_store.go`; existing databases are migrated automatically on startup. Never use `CREATE TABLE` without `IF NOT EXISTS` and never drop columns.

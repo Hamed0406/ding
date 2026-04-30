@@ -20,7 +20,7 @@
 //   Cloudflare Tunnel strips Set-Cookie headers from certain responses.
 // ============================================================
 
-import type { Device, DeviceHistoryEntry, HistoryEntry, SpeedtestResult, Status, TopologyGraph } from '../types'
+import type { ChangeLogEntry, Device, DeviceHistoryEntry, HistoryEntry, SpeedtestResult, Status, TopologyGraph } from '../types'
 
 // Thrown when any API call gets a 401 — lets App.tsx redirect to the login page.
 export class AuthError extends Error {
@@ -172,6 +172,28 @@ export async function testTelegramSettings(): Promise<void> {
   }
 }
 
+// GET /api/settings/webhook
+export const fetchWebhookSettings = () =>
+  get<{ url: string; url_set: boolean }>('/api/settings/webhook')
+
+// PUT /api/settings/webhook
+export async function saveWebhookSettings(url: string): Promise<void> {
+  const res = await send('PUT', '/api/settings/webhook', { url })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string }
+    throw new Error(body.error ?? `save failed: HTTP ${res.status}`)
+  }
+}
+
+// POST /api/settings/webhook/test
+export async function testWebhookSettings(): Promise<void> {
+  const res = await send('POST', '/api/settings/webhook/test')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string }
+    throw new Error(body.error ?? `test failed: HTTP ${res.status}`)
+  }
+}
+
 // PUT /api/devices/{ip}/notify
 export async function setDeviceNotify(ip: string, enabled: boolean): Promise<void> {
   const res = await send('PUT', `/api/devices/${encodeURIComponent(ip)}/notify`, { enabled })
@@ -203,3 +225,17 @@ export async function runSpeedtest(): Promise<SpeedtestResult> {
 
 // GET /api/speedtest/history — last 20 results, newest first
 export const fetchSpeedtestHistory = () => get<SpeedtestResult[]>('/api/speedtest/history')
+
+// GET /api/changes — last N change-log entries, newest first (default 200)
+export const fetchChangeLog = (limit = 200) =>
+  get<ChangeLogEntry[]>(`/api/changes?limit=${limit}`)
+
+// GET /api/devices/export — trigger a browser download of all devices
+// format: 'csv' (default) or 'json'
+export function exportDevices(format: 'csv' | 'json' = 'csv'): void {
+  const token = getToken()
+  const tokenParam = token ? `&token=${encodeURIComponent(token)}` : ''
+  // Use window.location to trigger a real download (not fetch) so the browser
+  // shows the Save-As dialog / downloads to the Downloads folder automatically.
+  window.location.href = `/api/devices/export?format=${format}${tokenParam}`
+}

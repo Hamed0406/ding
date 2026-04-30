@@ -2,26 +2,40 @@
 // controller/internal/api/handlers.go — REST API endpoints
 //
 // Each function here handles one URL:
-//   GET    /api/auth/providers            → which OAuth providers are configured
-//   POST   /api/auth/register             → create a new account (email + password)
-//   POST   /api/auth/login                → sign in with email + password
-//   POST   /api/auth/logout               → invalidate session cookie
-//   GET    /api/auth/{provider}           → start OAuth flow (google / github)
-//   GET    /api/auth/{provider}/callback  → OAuth callback
-//   GET    /api/status                    → interface/subnet, last scan time
-//   GET    /api/devices                   → all known devices (stable registry view)
-//   GET    /api/devices/{ip}/history      → per-device scan history (last 100 scans)
-//   GET    /api/history                   → last 20 scan records
-//   GET    /api/topology                  → network graph (nodes + edges)
-//   POST   /api/scan                      → trigger a new scan immediately
-//   POST   /api/devices/{ip}/wake         → send a Wake-on-LAN magic packet
-//   PUT    /api/devices/{ip}/label        → set a custom name for a device
-//   DELETE /api/devices/{ip}/label        → remove a custom name
+//   GET    /api/auth/providers              → which OAuth providers are configured
+//   POST   /api/auth/register              → create a new account (email + password)
+//   POST   /api/auth/login                 → sign in with email + password
+//   POST   /api/auth/logout                → invalidate session cookie
+//   GET    /api/auth/{provider}            → start OAuth flow (google / github)
+//   GET    /api/auth/{provider}/callback   → OAuth callback
+//   POST   /api/auth/exchange              → consume one-time OAuth exchange token
+//   GET    /api/status                     → interface/subnet, last scan time
+//   GET    /api/devices                    → all known devices (stable registry view)
+//   GET    /api/devices/export             → download device list as CSV or JSON
+//   GET    /api/devices/{ip}/history       → per-device scan history (last 100 scans)
+//   GET    /api/changes                    → persistent change log (last 200 events)
+//   GET    /api/history                    → last 20 scan records
+//   GET    /api/topology                   → network graph (nodes + edges)
+//   POST   /api/scan                       → trigger a new scan immediately
+//   POST   /api/devices/{ip}/scan          → scan one device's ports immediately
+//   POST   /api/devices/{ip}/wake          → send a Wake-on-LAN magic packet
+//   PUT    /api/devices/{ip}/label         → set a custom name for a device
+//   DELETE /api/devices/{ip}/label         → remove a custom name
+//   PUT    /api/devices/{ip}/notify        → toggle per-device alerts
+//   GET    /api/settings/telegram          → get current user's Telegram config
+//   PUT    /api/settings/telegram          → save current user's Telegram token + chat ID
+//   POST   /api/settings/telegram/test     → send a test Telegram message
+//   GET    /api/settings/webhook           → get current user's webhook URL
+//   PUT    /api/settings/webhook           → save current user's webhook URL
+//   POST   /api/settings/webhook/test      → send a test webhook payload
+//   POST   /api/speedtest                  → run an internet speed test (5–30 s)
+//   GET    /api/speedtest/history          → last 20 speed test results
 // ============================================================
 
 package api
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -218,6 +232,91 @@ func (s *Server) handleDevices(w http.ResponseWriter, _ *http.Request) {
 		devices = []scanner.Result{} // return an empty array, not null
 	}
 	writeJSON(w, http.StatusOK, devices)
+}
+
+// handleExport responds to GET /api/devices/export
+// Query param: format=csv (default) or format=json
+// Returns all known devices as a downloadable file.
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	devices := s.store.AllDevices()
+	if devices == nil {
+		devices = []scanner.Result{}
+	}
+
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "csv"
+	}
+
+	ts := time.Now().UTC().Format("2006-01-02")
+
+	switch format {
+	case "json":
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="ding-devices-%s.json"`, ts))
+		json.NewEncoder(w).Encode(devices) //nolint:errcheck
+	default: // csv
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="ding-devices-%s.csv"`, ts))
+
+		cw := csv.NewWriter(w)
+		cw.Write([]string{"IP", "MAC", "Hostname", "Label", "Vendor", "Device Type", "OS", "Open Ports", "Alive", "First Seen", "Last Seen"}) //nolint:errcheck
+		for _, d := range devices {
+			ports := make([]string, len(d.OpenPorts))
+			for i, p := range d.OpenPorts {
+				ports[i] = strconv.Itoa(int(p))
+			}
+			alive := "no"
+			if d.Alive {
+				alive = "yes"
+			}
+			firstSeen, lastSeen := "", ""
+			if d.FirstSeen != nil {
+				firstSeen = d.FirstSeen.UTC().Format(time.RFC3339)
+			}
+			if d.LastSeen != nil {
+				lastSeen = d.LastSeen.UTC().Format(time.RFC3339)
+			}
+			cw.Write([]string{ //nolint:errcheck
+				d.IP,
+				strVal(d.MAC),
+				strVal(d.Hostname),
+				strVal(d.Label),
+				strVal(d.Vendor),
+				strVal(d.DeviceType),
+				strVal(d.OS),
+				strings.Join(ports, " "),
+				alive,
+				firstSeen,
+				lastSeen,
+			})
+		}
+		cw.Flush()
+	}
+}
+
+// strVal dereferences a *string, returning "" if nil.
+func strVal(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// handleChanges responds to GET /api/changes
+// Returns the last n change-log entries (newest first). Default 200; override with ?limit=N.
+func (s *Server) handleChanges(w http.ResponseWriter, r *http.Request) {
+	limit := 200
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 1000 {
+			limit = n
+		}
+	}
+	entries := s.store.Changes(limit)
+	if entries == nil {
+		entries = []storage.ChangeLogEntry{}
+	}
+	writeJSON(w, http.StatusOK, entries)
 }
 
 // handleHistory responds to GET /api/history
@@ -485,6 +584,50 @@ func (s *Server) handleTestTelegram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "test message sent"})
+}
+
+// handleGetWebhook responds to GET /api/settings/webhook
+// Returns the current user's webhook URL (masked to just the host for display).
+func (s *Server) handleGetWebhook(w http.ResponseWriter, r *http.Request) {
+	u, err := s.users.GetWebhookURL(s.currentUserID(r))
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"url": "", "url_set": false})
+		return
+	}
+	set := u != ""
+	writeJSON(w, http.StatusOK, map[string]any{"url": u, "url_set": set})
+}
+
+// handleSaveWebhook responds to PUT /api/settings/webhook
+// Body: {"url": "https://..."} — pass empty string to clear.
+func (s *Server) handleSaveWebhook(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if err := s.users.SaveWebhookURL(s.currentUserID(r), body.URL); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "saved"})
+}
+
+// handleTestWebhook responds to POST /api/settings/webhook/test
+// Fires a test payload to the user's configured webhook URL.
+func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
+	u, err := s.users.GetWebhookURL(s.currentUserID(r))
+	if err != nil || u == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no webhook URL configured"})
+		return
+	}
+	if err := alert.SendTestWebhook(u); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "test payload sent"})
 }
 
 // handleSpeedtest responds to POST /api/speedtest
