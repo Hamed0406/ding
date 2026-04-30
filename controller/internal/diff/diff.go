@@ -26,10 +26,11 @@ import (
 type ChangeKind string
 
 const (
-	KindNew   ChangeKind = "NEW"
-	KindGone  ChangeKind = "GONE"
-	KindPorts ChangeKind = "PORTS"
-	KindBack  ChangeKind = "BACK" // device returned after being absent in the previous scan
+	KindNew       ChangeKind = "NEW"
+	KindGone      ChangeKind = "GONE"
+	KindPorts     ChangeKind = "PORTS"
+	KindBack      ChangeKind = "BACK"      // device returned after being absent in the previous scan
+	KindMACChange ChangeKind = "MAC_CHANGE" // IP answered with a different MAC — possible ARP spoofing
 )
 
 type Change struct {

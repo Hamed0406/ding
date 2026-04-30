@@ -148,6 +148,16 @@ func sqliteMigrate(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_change_log_time ON change_log(occurred_at DESC);
 	`)
+	_, _ = db.Exec(`
+		CREATE TABLE IF NOT EXISTS mac_history (
+			ip         TEXT     NOT NULL,
+			mac        TEXT     NOT NULL,
+			first_seen DATETIME NOT NULL,
+			last_seen  DATETIME NOT NULL,
+			PRIMARY KEY (ip, mac)
+		);
+		CREATE INDEX IF NOT EXISTS idx_mac_history_ip ON mac_history(ip);
+	`)
 	return nil
 }
 
@@ -570,4 +580,81 @@ func (s *SQLiteStore) Changes(n int) []ChangeLogEntry {
 		entries = append(entries, e)
 	}
 	return entries
+}
+
+// UpdateMACHistory records the current MAC for every alive device and returns
+// a MACChange for each IP whose MAC differs from the most recently recorded one.
+func (s *SQLiteStore) UpdateMACHistory(results []scanner.Result) ([]MACChange, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	var conflicts []MACChange
+
+	for _, r := range results {
+		if !r.Alive || r.MAC == nil || *r.MAC == "" {
+			continue
+		}
+		ip, mac := r.IP, *r.MAC
+
+		// Find the most recently seen MAC for this IP (may differ from current).
+		var prevMAC string
+		err := s.db.QueryRow(`
+			SELECT mac FROM mac_history WHERE ip = ? ORDER BY last_seen DESC LIMIT 1
+		`, ip).Scan(&prevMAC)
+		if err == nil && prevMAC != mac {
+			conflicts = append(conflicts, MACChange{IP: ip, OldMAC: prevMAC, NewMAC: mac})
+		}
+
+		// Upsert this (ip, mac) pair — set first_seen only on insert.
+		_, _ = s.db.Exec(`
+			INSERT INTO mac_history (ip, mac, first_seen, last_seen) VALUES (?, ?, ?, ?)
+			ON CONFLICT(ip, mac) DO UPDATE SET last_seen = excluded.last_seen
+		`, ip, mac, now, now)
+	}
+	return conflicts, nil
+}
+
+// ARPConflicts returns all IPs that have been seen with more than one distinct
+// MAC address, with their full history ordered newest-first.
+func (s *SQLiteStore) ARPConflicts() []ARPWatchEntry {
+	// Find IPs with multiple MACs.
+	ipRows, err := s.db.Query(`
+		SELECT ip FROM mac_history GROUP BY ip HAVING COUNT(DISTINCT mac) > 1 ORDER BY ip
+	`)
+	if err != nil {
+		return nil
+	}
+	defer ipRows.Close()
+
+	var ips []string
+	for ipRows.Next() {
+		var ip string
+		if err := ipRows.Scan(&ip); err == nil {
+			ips = append(ips, ip)
+		}
+	}
+	ipRows.Close()
+
+	var out []ARPWatchEntry
+	for _, ip := range ips {
+		rows, err := s.db.Query(`
+			SELECT mac, first_seen, last_seen FROM mac_history
+			WHERE ip = ? ORDER BY last_seen DESC
+		`, ip)
+		if err != nil {
+			continue
+		}
+		var history []MACHistoryEntry
+		for rows.Next() {
+			var e MACHistoryEntry
+			var fs, ls string
+			if err := rows.Scan(&e.MAC, &fs, &ls); err != nil {
+				continue
+			}
+			e.FirstSeen, _ = time.Parse(time.RFC3339, fs)
+			e.LastSeen, _ = time.Parse(time.RFC3339, ls)
+			history = append(history, e)
+		}
+		rows.Close()
+		out = append(out, ARPWatchEntry{IP: ip, History: history})
+	}
+	return out
 }

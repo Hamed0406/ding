@@ -14,6 +14,7 @@
 //   GET    /api/devices/export             → download device list as CSV or JSON
 //   GET    /api/devices/{ip}/history       → per-device scan history (last 100 scans)
 //   GET    /api/changes                    → persistent change log (last 200 events)
+//   GET    /api/arpwatch                   → IPs with multiple MACs (ARP spoof candidates)
 //   GET    /api/history                    → last 20 scan records
 //   GET    /api/topology                   → network graph (nodes + edges)
 //   POST   /api/scan                       → trigger a new scan immediately
@@ -317,6 +318,18 @@ func (s *Server) handleChanges(w http.ResponseWriter, r *http.Request) {
 		entries = []storage.ChangeLogEntry{}
 	}
 	writeJSON(w, http.StatusOK, entries)
+}
+
+// handleARPWatch responds to GET /api/arpwatch
+// Returns every IP that has been seen with more than one distinct MAC address,
+// along with its full MAC history (newest first). An empty array means no
+// spoofing candidates have been detected.
+func (s *Server) handleARPWatch(w http.ResponseWriter, _ *http.Request) {
+	conflicts := s.store.ARPConflicts()
+	if conflicts == nil {
+		conflicts = []storage.ARPWatchEntry{}
+	}
+	writeJSON(w, http.StatusOK, conflicts)
 }
 
 // handleHistory responds to GET /api/history

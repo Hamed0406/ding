@@ -33,8 +33,9 @@ type Result struct {
 	Alive      bool       `json:"alive"`
 	Gateway    *string    `json:"gateway,omitempty"`
 	TTL        *uint8     `json:"ttl,omitempty"`
-	FirstSeen  *time.Time `json:"first_seen,omitempty"` // wall-clock time this IP was first recorded alive
-	LastSeen   *time.Time `json:"last_seen,omitempty"`  // most recent scan in which the device was alive
+	FirstSeen   *time.Time `json:"first_seen,omitempty"`   // wall-clock time this IP was first recorded alive
+	LastSeen    *time.Time `json:"last_seen,omitempty"`    // most recent scan in which the device was alive
+	MACConflict *string    `json:"mac_conflict,omitempty"` // previous MAC if current MAC differs — possible ARP spoofing
 }
 
 // ArpEvent is emitted by the scanner in --mode listen, one JSON line per event.

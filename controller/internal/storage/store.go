@@ -37,6 +37,28 @@ type DeviceHistoryEntry struct {
 	OpenPorts []uint16  `json:"open_ports"`
 }
 
+// MACChange is returned by UpdateMACHistory when an IP is seen with a different
+// MAC than the last time — the classic signal of ARP cache poisoning.
+type MACChange struct {
+	IP     string // IP address that changed
+	OldMAC string // MAC seen in the most recent previous scan
+	NewMAC string // MAC seen in the current scan
+}
+
+// MACHistoryEntry is one row in the mac_history table for a given IP.
+type MACHistoryEntry struct {
+	MAC       string    `json:"mac"`
+	FirstSeen time.Time `json:"first_seen"`
+	LastSeen  time.Time `json:"last_seen"`
+}
+
+// ARPWatchEntry groups the full MAC history for an IP that has been seen with
+// more than one distinct MAC address (i.e. a potential spoof target).
+type ARPWatchEntry struct {
+	IP      string           `json:"ip"`
+	History []MACHistoryEntry `json:"history"` // newest first; [0] is the current MAC
+}
+
 // ChangeLogEntry is one persisted network-change event.
 type ChangeLogEntry struct {
 	OccurredAt time.Time      `json:"occurred_at"`
@@ -96,6 +118,14 @@ type Store interface {
 	SaveChanges(changes []diff.Change, occurredAt time.Time) error
 	// Changes returns the last n change-log entries, newest first.
 	Changes(n int) []ChangeLogEntry
+
+	// UpdateMACHistory records the current IP→MAC mapping for every alive device
+	// and returns a MACChange for any IP whose MAC differs from the last recorded one.
+	// Call this once per scan cycle, after enrichment.
+	UpdateMACHistory(results []scanner.Result) ([]MACChange, error)
+	// ARPConflicts returns all IPs that have been seen with more than one distinct
+	// MAC address, along with their full MAC history (newest first).
+	ARPConflicts() []ARPWatchEntry
 }
 
 // JSONStore is the legacy Store implementation: a single JSON file on disk.
@@ -246,6 +276,8 @@ func (s *JSONStore) SaveSpeedtest(_ SpeedtestResult) error                      
 func (s *JSONStore) SpeedtestHistory(_ int) []SpeedtestResult                      { return nil }
 func (s *JSONStore) SaveChanges(_ []diff.Change, _ time.Time) error                { return nil }
 func (s *JSONStore) Changes(_ int) []ChangeLogEntry                                { return nil }
+func (s *JSONStore) UpdateMACHistory(_ []scanner.Result) ([]MACChange, error)      { return nil, nil }
+func (s *JSONStore) ARPConflicts() []ARPWatchEntry                                 { return nil }
 
 func (s *JSONStore) labelsPath() string { return s.path + ".labels" }
 

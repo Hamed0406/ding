@@ -281,6 +281,7 @@ func NewServer(cfg Config, store storage.Store, users storage.UserStore, broker 
 	s.mux.HandleFunc("GET /api/devices/{ip}/history", s.requireAuth(s.handleDeviceHistory))
 	s.mux.HandleFunc("GET /api/history", s.requireAuth(s.handleHistory))
 	s.mux.HandleFunc("GET /api/changes", s.requireAuth(s.handleChanges))
+	s.mux.HandleFunc("GET /api/arpwatch", s.requireAuth(s.handleARPWatch))
 	s.mux.HandleFunc("GET /api/topology", s.requireAuth(s.handleTopology))
 	s.mux.HandleFunc("POST /api/scan", s.requireAuth(s.handleScan))
 	s.mux.HandleFunc("POST /api/devices/{ip}/scan", s.requireAuth(s.handleDeviceScan))

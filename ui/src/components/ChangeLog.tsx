@@ -6,27 +6,30 @@ import { useEffect, useState } from 'react'
 import { fetchChangeLog } from '../api/client'
 import type { ChangeLogEntry } from '../types'
 
-type KindFilter = 'ALL' | 'NEW' | 'BACK' | 'GONE' | 'PORTS'
+type KindFilter = 'ALL' | 'NEW' | 'BACK' | 'GONE' | 'PORTS' | 'MAC_CHANGE'
 
 const kindStyle: Record<string, string> = {
-  NEW:   'border-green-500 bg-green-950/30',
-  BACK:  'border-blue-500  bg-blue-950/30',
-  GONE:  'border-red-500   bg-red-950/30',
-  PORTS: 'border-amber-500 bg-amber-950/30',
+  NEW:        'border-green-500  bg-green-950/30',
+  BACK:       'border-blue-500   bg-blue-950/30',
+  GONE:       'border-red-500    bg-red-950/30',
+  PORTS:      'border-amber-500  bg-amber-950/30',
+  MAC_CHANGE: 'border-orange-500 bg-orange-950/40',
 }
 
 const kindBadge: Record<string, string> = {
-  NEW:   'bg-green-800 text-green-300',
-  BACK:  'bg-blue-800  text-blue-300',
-  GONE:  'bg-red-800   text-red-300',
-  PORTS: 'bg-amber-800 text-amber-300',
+  NEW:        'bg-green-800  text-green-300',
+  BACK:       'bg-blue-800   text-blue-300',
+  GONE:       'bg-red-800    text-red-300',
+  PORTS:      'bg-amber-800  text-amber-300',
+  MAC_CHANGE: 'bg-orange-800 text-orange-200',
 }
 
 const kindLabel: Record<string, string> = {
-  NEW:   'New device',
-  BACK:  'Device returned',
-  GONE:  'Device left',
-  PORTS: 'Ports changed',
+  NEW:        'New device',
+  BACK:       'Device returned',
+  GONE:       'Device left',
+  PORTS:      'Ports changed',
+  MAC_CHANGE: 'MAC changed — possible ARP spoofing',
 }
 
 function formatTime(iso: string): string {
@@ -66,7 +69,7 @@ export function ChangeLog({ scanCount }: Props) {
       {/* Header + filter pills */}
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-semibold text-slate-300 mr-2">Event log</h2>
-        {(['ALL', 'NEW', 'BACK', 'GONE', 'PORTS'] as KindFilter[]).map((k) => {
+        {(['ALL', 'NEW', 'BACK', 'GONE', 'PORTS', 'MAC_CHANGE'] as KindFilter[]).map((k) => {
           const count = k === 'ALL' ? entries.length : (counts[k] ?? 0)
           return (
             <button

@@ -119,6 +119,21 @@ func main() {
 		// open port hints. Runs after classify so it can't clobber DeviceType.
 		enrich.AnnotateOS(results)
 
+		// Check for ARP spoofing: detect IPs that answered with a different MAC
+		// than the last recorded one and tag the affected results immediately so
+		// the UI can show a warning badge.
+		macChanges, err := store.UpdateMACHistory(results)
+		if err != nil {
+			log.Printf("arp watch: %v", err)
+		}
+		for i := range results {
+			for _, mc := range macChanges {
+				if results[i].IP == mc.IP {
+					results[i].MACConflict = &mc.OldMAC
+				}
+			}
+		}
+
 		// Load what we found last time so we can compare
 		previous := store.Latest()
 
@@ -128,6 +143,16 @@ func main() {
 
 		// Figure out what changed: new devices, gone devices, returning devices, port changes
 		changes := diff.Compare(previous, results, knownIPs)
+
+		// Append MAC_CHANGE events — these are always included in alerts regardless
+		// of the per-device notify preference because they are security events.
+		for _, mc := range macChanges {
+			changes = append(changes, diff.Change{
+				Kind: diff.KindMACChange,
+				IP:   mc.IP,
+				Desc: fmt.Sprintf("was %s now %s — possible ARP spoofing", mc.OldMAC, mc.NewMAC),
+			})
+		}
 
 		// Save the new results to disk
 		if err := store.Save(results); err != nil {
@@ -139,7 +164,8 @@ func main() {
 			log.Printf("save changes: %v", err)
 		}
 
-		// Build the filtered change list: only devices with notifications enabled.
+		// Build the filtered change list: devices with notifications enabled, plus
+		// MAC_CHANGE events which always alert regardless of per-device preference.
 		var alertChanges []diff.Change
 		if len(changes) > 0 {
 			enabled := make(map[string]bool)
@@ -149,7 +175,7 @@ func main() {
 				}
 			}
 			for _, c := range changes {
-				if enabled[c.IP] {
+				if c.Kind == diff.KindMACChange || enabled[c.IP] {
 					alertChanges = append(alertChanges, c)
 				}
 			}

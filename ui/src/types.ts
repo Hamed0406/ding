@@ -6,6 +6,19 @@
 // if you try to access a field that doesn't exist, it errors.
 // ============================================================
 
+// One MAC address entry in the ARP watch history for an IP.
+export interface MACHistoryEntry {
+  mac: string
+  first_seen: string  // ISO timestamp
+  last_seen: string   // ISO timestamp
+}
+
+// One entry returned by GET /api/arpwatch — an IP seen with multiple MACs.
+export interface ARPWatchEntry {
+  ip: string
+  history: MACHistoryEntry[]  // newest first; [0] is the current MAC
+}
+
 // One device found on the network (matches scanner.Result in Go)
 export interface Device {
   ip: string             // e.g. "192.168.1.42"
@@ -20,11 +33,12 @@ export interface Device {
   alive: boolean           // true if device responded in the most recent scan
   first_seen?: string      // ISO timestamp of the first scan in which this device was alive
   last_seen?: string       // ISO timestamp of the most recent scan in which this device was alive
+  mac_conflict?: string    // previous MAC if current MAC differs — possible ARP spoofing
 }
 
 // One change detected between scans (matches diff.Change in Go)
 export interface Change {
-  kind: 'NEW' | 'GONE' | 'PORTS' | 'BACK' // what type of change it is
+  kind: 'NEW' | 'GONE' | 'PORTS' | 'BACK' | 'MAC_CHANGE' // what type of change it is
   ip: string                               // which device changed
   desc: string                             // human-readable description, e.g. "mac=aa:bb:... ports=[22]"
 }

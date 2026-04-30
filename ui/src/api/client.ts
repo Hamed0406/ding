@@ -20,7 +20,7 @@
 //   Cloudflare Tunnel strips Set-Cookie headers from certain responses.
 // ============================================================
 
-import type { ChangeLogEntry, Device, DeviceHistoryEntry, HistoryEntry, SpeedtestResult, Status, TopologyGraph } from '../types'
+import type { ARPWatchEntry, ChangeLogEntry, Device, DeviceHistoryEntry, HistoryEntry, SpeedtestResult, Status, TopologyGraph } from '../types'
 
 // Thrown when any API call gets a 401 — lets App.tsx redirect to the login page.
 export class AuthError extends Error {
@@ -229,6 +229,9 @@ export const fetchSpeedtestHistory = () => get<SpeedtestResult[]>('/api/speedtes
 // GET /api/changes — last N change-log entries, newest first (default 200)
 export const fetchChangeLog = (limit = 200) =>
   get<ChangeLogEntry[]>(`/api/changes?limit=${limit}`)
+
+// GET /api/arpwatch — IPs that have been seen with more than one distinct MAC
+export const fetchARPWatch = () => get<ARPWatchEntry[]>('/api/arpwatch')
 
 // GET /api/devices/export — trigger a browser download of all devices
 // format: 'csv' (default) or 'json'

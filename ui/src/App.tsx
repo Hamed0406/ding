@@ -19,7 +19,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AuthError, deleteDeviceLabel, exchangeToken, exportDevices, fetchDevices, fetchStatus, logout, setDeviceLabel, setDeviceNotify, triggerScan } from './api/client'
+import { AuthError, deleteDeviceLabel, exchangeToken, exportDevices, fetchARPWatch, fetchDevices, fetchStatus, logout, setDeviceLabel, setDeviceNotify, triggerScan } from './api/client'
 import { ChangeLog } from './components/ChangeLog'
 import { ChangesFeed } from './components/ChangesFeed'
 import { DeviceGrid } from './components/DeviceGrid'
@@ -30,7 +30,7 @@ import { SettingsPage } from './components/SettingsPage'
 import { StatusBar } from './components/StatusBar'
 import { TopologyMap } from './components/TopologyMap'
 import { useEvents } from './hooks/useEvents'
-import type { Change, Device, Status } from './types'
+import type { ARPWatchEntry, Change, Device, Status } from './types'
 
 export default function App() {
   // --- State ---
@@ -48,6 +48,7 @@ export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null)
   const [authError, setAuthError] = useState('')
   const [page, setPage] = useState<'main' | 'settings'>('main')
+  const [arpConflicts, setArpConflicts] = useState<ARPWatchEntry[]>([])
 
   // --- Initial data load ---
   // Fetch status + devices on mount. A 401 means auth is required — show login page.
@@ -55,6 +56,7 @@ export default function App() {
     Promise.all([
       fetchStatus().then(setStatus),
       fetchDevices().then(setDevices),
+      fetchARPWatch().then(setArpConflicts).catch(() => {}),
     ])
       .then(() => setAuthed(true))
       .catch((err) => {
@@ -102,6 +104,8 @@ export default function App() {
         setStatus((s) => (s ? { ...s, last_scan: event.scanned_at } : s))
         // Bump counter so TopologyMap re-fetches the latest graph
         setScanCount((n) => n + 1)
+        // Refresh ARP watch data — MAC conflicts may have been detected
+        fetchARPWatch().then(setArpConflicts).catch(() => {})
       } else if (event.type === 'scan_error') {
         // Something went wrong — hide the spinner and log the error
         setScanning(false)
@@ -359,6 +363,21 @@ export default function App() {
               </div>
             )}
 
+            {/* ARP spoof global warning — shown in all views when conflicts exist */}
+            {arpConflicts.length > 0 && view !== 'events' && (
+              <button
+                onClick={() => setView('events')}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-orange-700/50 bg-orange-950/30 text-left hover:bg-orange-950/50 transition-colors"
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 text-orange-400 shrink-0">
+                  <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+                </svg>
+                <span className="text-xs text-orange-300 font-medium">
+                  ARP spoofing warning — {arpConflicts.length} {arpConflicts.length === 1 ? 'device has' : 'devices have'} changed MAC address. Click to review.
+                </span>
+              </button>
+            )}
+
             {/* Changes since last scan — only shown in grid / topology views */}
             {view !== 'events' && <ChangesFeed changes={changes} />}
 
@@ -380,7 +399,43 @@ export default function App() {
             ) : view === 'topology' ? (
               <TopologyMap scanCount={scanCount} />
             ) : (
-              <ChangeLog scanCount={scanCount} />
+              <>
+                {/* ARP Watch summary — shown only when conflicts exist */}
+                {arpConflicts.length > 0 && (
+                  <div className="rounded-xl border border-orange-700/50 bg-orange-950/30 p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-orange-400 shrink-0">
+                        <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+                      </svg>
+                      <h3 className="text-sm font-semibold text-orange-300">
+                        ARP Watch — {arpConflicts.length} suspicious {arpConflicts.length === 1 ? 'address' : 'addresses'}
+                      </h3>
+                    </div>
+                    <p className="text-xs text-orange-400/80">
+                      These IPs have been seen with more than one MAC address. This may indicate ARP cache poisoning, a device swap, or DHCP reassignment.
+                    </p>
+                    <div className="space-y-2">
+                      {arpConflicts.map((entry) => (
+                        <div key={entry.ip} className="rounded-lg bg-slate-900/60 px-3 py-2 space-y-1.5">
+                          <p className="font-mono text-sm font-semibold text-slate-200">{entry.ip}</p>
+                          <div className="space-y-1">
+                            {entry.history.map((h, i) => (
+                              <div key={h.mac} className="flex items-center gap-2 text-xs">
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${i === 0 ? 'bg-orange-400' : 'bg-slate-600'}`} />
+                                <span className="font-mono text-slate-300">{h.mac}</span>
+                                <span className="text-slate-500">
+                                  {i === 0 ? 'current' : `last seen ${new Date(h.last_seen).toLocaleDateString()}`}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <ChangeLog scanCount={scanCount} />
+              </>
             )}
           </>
         )}

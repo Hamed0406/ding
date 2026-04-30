@@ -9,18 +9,20 @@ import type { Change } from '../types'
 
 // Tailwind classes for the left border + background of each change type
 const kindStyle: Record<string, string> = {
-  NEW:   'border-green-500 bg-green-950/30',
-  BACK:  'border-blue-500  bg-blue-950/30',
-  GONE:  'border-red-500   bg-red-950/30',
-  PORTS: 'border-amber-500 bg-amber-950/30',
+  NEW:        'border-green-500  bg-green-950/30',
+  BACK:       'border-blue-500   bg-blue-950/30',
+  GONE:       'border-red-500    bg-red-950/30',
+  PORTS:      'border-amber-500  bg-amber-950/30',
+  MAC_CHANGE: 'border-orange-500 bg-orange-950/40',
 }
 
-// Tailwind classes for the small badge label ("NEW", "BACK", "GONE", "PORTS")
+// Tailwind classes for the small badge label
 const kindBadge: Record<string, string> = {
-  NEW:   'bg-green-800 text-green-300',
-  BACK:  'bg-blue-800  text-blue-300',
-  GONE:  'bg-red-800   text-red-300',
-  PORTS: 'bg-amber-800 text-amber-300',
+  NEW:        'bg-green-800  text-green-300',
+  BACK:       'bg-blue-800   text-blue-300',
+  GONE:       'bg-red-800    text-red-300',
+  PORTS:      'bg-amber-800  text-amber-300',
+  MAC_CHANGE: 'bg-orange-800 text-orange-200',
 }
 
 interface Props {
