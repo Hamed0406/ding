@@ -1,0 +1,14 @@
+#!/bin/sh
+# Fake scanner for testing. Handles all three scanner modes:
+#   normal scan  → prints empty JSON array and exits
+#   --mode listen → runs forever (passive ARP listener), prints nothing
+#   --mode mdns  → prints empty JSON array and exits
+case "$*" in
+  *--mode\ listen*)
+    # Block forever so the passive listener goroutine doesn't restart-loop
+    while true; do sleep 3600; done
+    ;;
+  *)
+    printf '[]'
+    ;;
+esac

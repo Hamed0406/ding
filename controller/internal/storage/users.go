@@ -19,6 +19,16 @@ type TelegramConfig struct {
 	ChatID string
 }
 
+// EmailConfig holds a user's SMTP email alert settings.
+type EmailConfig struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+}
+
 // UserStore is the persistence interface for user accounts.
 // *SQLiteStore implements this alongside Store.
 type UserStore interface {
@@ -50,6 +60,13 @@ type UserStore interface {
 	// GetAllWebhookURLs returns every non-empty webhook URL across all users.
 	// Used by the alert pipeline to fire all configured webhooks.
 	GetAllWebhookURLs() []string
+
+	// SaveEmailConfig stores or clears the SMTP email config for a user.
+	SaveEmailConfig(userID int64, cfg EmailConfig) error
+	// GetEmailConfig returns the email config for a specific user.
+	GetEmailConfig(userID int64) (EmailConfig, error)
+	// GetAllEmailConfigs returns configs for every user that has email alerts configured.
+	GetAllEmailConfigs() []EmailConfig
 }
 
 // CreateUser inserts a new user row and returns the created user.
@@ -167,6 +184,58 @@ func (s *SQLiteStore) GetAllWebhookURLs() []string {
 		}
 	}
 	return urls
+}
+
+// SaveEmailConfig upserts the SMTP config for the given user.
+// Passing an empty Host clears the config (disables email alerts for that user).
+func (s *SQLiteStore) SaveEmailConfig(userID int64, cfg EmailConfig) error {
+	_, err := s.db.Exec(`
+		INSERT INTO user_email_config (user_id, host, port, username, password, from_addr, to_addr)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET
+			host      = excluded.host,
+			port      = excluded.port,
+			username  = excluded.username,
+			password  = excluded.password,
+			from_addr = excluded.from_addr,
+			to_addr   = excluded.to_addr
+	`, userID, cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.From, cfg.To)
+	return err
+}
+
+// GetEmailConfig returns the email config for the given user ID.
+// Returns a zero-value config (Host="") if none is stored.
+func (s *SQLiteStore) GetEmailConfig(userID int64) (EmailConfig, error) {
+	var cfg EmailConfig
+	err := s.db.QueryRow(`
+		SELECT host, port, username, password, from_addr, to_addr
+		FROM user_email_config WHERE user_id = ?
+	`, userID).Scan(&cfg.Host, &cfg.Port, &cfg.Username, &cfg.Password, &cfg.From, &cfg.To)
+	if err == sql.ErrNoRows {
+		return EmailConfig{Port: 587}, nil
+	}
+	return cfg, err
+}
+
+// GetAllEmailConfigs returns the email configs for every user that has a host and To address set.
+func (s *SQLiteStore) GetAllEmailConfigs() []EmailConfig {
+	rows, err := s.db.Query(`
+		SELECT host, port, username, password, from_addr, to_addr
+		FROM user_email_config
+		WHERE host != '' AND to_addr != ''
+	`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var cfgs []EmailConfig
+	for rows.Next() {
+		var cfg EmailConfig
+		if err := rows.Scan(&cfg.Host, &cfg.Port, &cfg.Username, &cfg.Password, &cfg.From, &cfg.To); err == nil {
+			cfgs = append(cfgs, cfg)
+		}
+	}
+	return cfgs
 }
 
 // GetAllTelegramConfigs returns configs for all users who have both a token and chat ID set.

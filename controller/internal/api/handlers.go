@@ -50,6 +50,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/ding/ding/internal/alert"
+	"github.com/ding/ding/internal/email"
 	"github.com/ding/ding/internal/scanner"
 	"github.com/ding/ding/internal/speedtest"
 	"github.com/ding/ding/internal/storage"
@@ -641,6 +642,82 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "test payload sent"})
+}
+
+// handleGetEmail responds to GET /api/settings/email
+// Returns the current user's SMTP config. Password is masked for display.
+func (s *Server) handleGetEmail(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.users.GetEmailConfig(s.currentUserID(r))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	masked := cfg.Password
+	if len(masked) > 0 {
+		masked = strings.Repeat("•", len(masked))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"host":         cfg.Host,
+		"port":         cfg.Port,
+		"username":     cfg.Username,
+		"password_set": cfg.Password != "",
+		"password_preview": masked,
+		"from":         cfg.From,
+		"to":           cfg.To,
+	})
+}
+
+// handleSaveEmail responds to PUT /api/settings/email
+// Body: {"host":"smtp.gmail.com","port":587,"username":"...","password":"...","from":"...","to":"..."}
+// Sending an empty password preserves the existing stored password.
+func (s *Server) handleSaveEmail(w http.ResponseWriter, r *http.Request) {
+	var body storage.EmailConfig
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	body.Host = strings.TrimSpace(body.Host)
+	body.To = strings.TrimSpace(body.To)
+	body.From = strings.TrimSpace(body.From)
+	body.Username = strings.TrimSpace(body.Username)
+
+	userID := s.currentUserID(r)
+	// Empty password in the request means "keep the existing one"
+	if body.Password == "" && body.Host != "" {
+		if existing, err := s.users.GetEmailConfig(userID); err == nil {
+			body.Password = existing.Password
+		}
+	}
+	if body.Port == 0 {
+		body.Port = 587
+	}
+	if err := s.users.SaveEmailConfig(userID, body); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save settings"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleTestEmail responds to POST /api/settings/email/test
+// Sends a test message using the current user's saved SMTP config.
+func (s *Server) handleTestEmail(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.users.GetEmailConfig(s.currentUserID(r))
+	if err != nil || cfg.Host == "" || cfg.To == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no email config saved — fill in host and To address first"})
+		return
+	}
+	if err := email.SendTest(email.Config{
+		Host:     cfg.Host,
+		Port:     cfg.Port,
+		Username: cfg.Username,
+		Password: cfg.Password,
+		From:     cfg.From,
+		To:       cfg.To,
+	}); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "test email sent"})
 }
 
 // handleSpeedtest responds to POST /api/speedtest

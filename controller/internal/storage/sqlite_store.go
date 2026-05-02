@@ -95,9 +95,6 @@ func sqliteMigrate(db *sql.DB) error {
 			updated_at DATETIME NOT NULL
 		)
 	`)
-	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN telegram_token   TEXT NOT NULL DEFAULT ''`)
-	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN telegram_chat_id TEXT NOT NULL DEFAULT ''`)
-	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN webhook_url       TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`
 		CREATE TABLE IF NOT EXISTS device_notify (
 			ip      TEXT PRIMARY KEY,
@@ -113,12 +110,29 @@ func sqliteMigrate(db *sql.DB) error {
 			created_at    DATETIME NOT NULL
 		)
 	`)
+	// Additive column migrations for the users table.
+	// These run after CREATE TABLE so they are safe on both fresh and existing databases.
+	// SQLite returns an error if the column already exists — ignored intentionally.
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN telegram_token   TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN telegram_chat_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN webhook_url       TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`
 		CREATE TABLE IF NOT EXISTS user_providers (
 			user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			provider    TEXT NOT NULL,
 			provider_id TEXT NOT NULL,
 			PRIMARY KEY (provider, provider_id)
+		)
+	`)
+	_, _ = db.Exec(`
+		CREATE TABLE IF NOT EXISTS user_email_config (
+			user_id  INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			host     TEXT NOT NULL DEFAULT '',
+			port     INTEGER NOT NULL DEFAULT 587,
+			username TEXT NOT NULL DEFAULT '',
+			password TEXT NOT NULL DEFAULT '',
+			from_addr TEXT NOT NULL DEFAULT '',
+			to_addr   TEXT NOT NULL DEFAULT ''
 		)
 	`)
 	_, _ = db.Exec(`

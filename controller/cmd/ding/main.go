@@ -25,6 +25,7 @@ import (
 
 	"github.com/ding/ding/internal/alert"
 	"github.com/ding/ding/internal/api"
+	"github.com/ding/ding/internal/email"
 	"github.com/ding/ding/internal/classify"
 	"github.com/ding/ding/internal/diff"
 	"github.com/ding/ding/internal/enrich"
@@ -197,6 +198,18 @@ func main() {
 		for _, webhookURL := range store.GetAllWebhookURLs() {
 			if err := alert.Send(alert.Config{WebhookURL: webhookURL}, alertChanges); err != nil {
 				log.Printf("alert webhook: %v", err)
+			}
+		}
+		for _, ec := range store.GetAllEmailConfigs() {
+			if err := email.Send(email.Config{
+				Host:     ec.Host,
+				Port:     ec.Port,
+				Username: ec.Username,
+				Password: ec.Password,
+				From:     ec.From,
+				To:       ec.To,
+			}, alertChanges); err != nil {
+				log.Printf("alert email: %v", err)
 			}
 		}
 

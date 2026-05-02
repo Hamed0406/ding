@@ -68,7 +68,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.25'
           cache-dependency-path: controller/go.sum
 
       # go:embed needs static/ to be non-empty at compile time.
@@ -140,3 +140,84 @@ jobs:
           tags: ${{ steps.meta.outputs.tags || 'ding:ci' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  test-ui:
+    name: UI component tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npm test
+
+  e2e:
+    name: E2E tests
+    runs-on: ubuntu-latest
+    needs: [go, ui]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: controller/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build UI
+        working-directory: ui
+        run: npm install && npm run build
+
+      - name: Copy UI to embed dir
+        run: |
+          mkdir -p controller/internal/api/static
+          cp -r ui/dist/* controller/internal/api/static/
+
+      - name: Build Go binary
+        working-directory: controller
+        run: go build -o /tmp/ding-e2e ./cmd/ding
+
+      - name: Make fake scanner executable
+        run: chmod +x scripts/fake-scanner
+
+      - name: Start server
+        run: |
+          DING_SCANNER_BIN=${{ github.workspace }}/scripts/fake-scanner \
+          DING_SCAN_INTERVAL="" \
+          DING_HTTP_ADDR=:8081 \
+          DING_DATA_PATH=/tmp/ding-e2e.db \
+          /tmp/ding-e2e &
+          echo $! > /tmp/ding-e2e.pid
+
+      - name: Wait for server
+        run: |
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:8081/api/auth/providers && break
+            echo "Waiting… ($i)"
+            sleep 1
+          done
+
+      - name: Install Playwright
+        working-directory: e2e
+        run: npm install && npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        working-directory: e2e
+        run: npm test
+
+      - name: Stop server
+        if: always()
+        run: kill $(cat /tmp/ding-e2e.pid) 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/

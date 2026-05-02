@@ -199,3 +199,160 @@ func TestSQLiteStore_AllDevices_Empty(t *testing.T) {
 		t.Errorf("AllDevices() on empty store should return nil, got %v", all)
 	}
 }
+
+// ── Speedtest ─────────────────────────────────────────────────────────────────
+
+func TestSQLiteStore_SpeedtestSaveAndHistory(t *testing.T) {
+	s := newTestStore(t)
+
+	r1 := SpeedtestResult{DownloadMbps: 100, UploadMbps: 50, PingMs: 10, Server: "cf"}
+	r2 := SpeedtestResult{DownloadMbps: 200, UploadMbps: 80, PingMs: 8, Server: "cf"}
+
+	if err := s.SaveSpeedtest(r1); err != nil {
+		t.Fatalf("SaveSpeedtest r1: %v", err)
+	}
+	if err := s.SaveSpeedtest(r2); err != nil {
+		t.Fatalf("SaveSpeedtest r2: %v", err)
+	}
+
+	// Should return 2 results newest-first
+	all := s.SpeedtestHistory(10)
+	if len(all) != 2 {
+		t.Fatalf("want 2 results, got %d", len(all))
+	}
+	// Newest first: r2 was inserted last
+	if all[0].DownloadMbps != 200 {
+		t.Errorf("first result: want 200 Mbps (newest), got %v", all[0].DownloadMbps)
+	}
+
+	// Limit to 1
+	limited := s.SpeedtestHistory(1)
+	if len(limited) != 1 {
+		t.Fatalf("want 1 result with limit 1, got %d", len(limited))
+	}
+}
+
+func TestSQLiteStore_SpeedtestHistory_Empty(t *testing.T) {
+	s := newTestStore(t)
+	results := s.SpeedtestHistory(10)
+	if len(results) != 0 {
+		t.Errorf("expected nil or empty, got %d results", len(results))
+	}
+}
+
+// ── Email config ──────────────────────────────────────────────────────────────
+
+func TestSQLiteStore_EmailConfig_Default(t *testing.T) {
+	s := newTestStore(t)
+	// Non-existent user ID — should return default config with Port 587
+	cfg, err := s.GetEmailConfig(9999)
+	if err != nil {
+		t.Fatalf("GetEmailConfig: %v", err)
+	}
+	if cfg.Host != "" {
+		t.Errorf("Host: want empty, got %q", cfg.Host)
+	}
+	if cfg.Port != 587 {
+		t.Errorf("Port: want 587, got %d", cfg.Port)
+	}
+}
+
+func TestSQLiteStore_EmailConfig_SaveAndGet(t *testing.T) {
+	s := newTestStore(t)
+	user, err := s.CreateUser("email@example.com", "hash")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	cfg := EmailConfig{
+		Host:     "smtp.example.com",
+		Port:     587,
+		Username: "user",
+		Password: "secret",
+		From:     "from@example.com",
+		To:       "to@example.com",
+	}
+	if err := s.SaveEmailConfig(user.ID, cfg); err != nil {
+		t.Fatalf("SaveEmailConfig: %v", err)
+	}
+
+	got, err := s.GetEmailConfig(user.ID)
+	if err != nil {
+		t.Fatalf("GetEmailConfig: %v", err)
+	}
+	if got.Host != cfg.Host {
+		t.Errorf("Host: want %q, got %q", cfg.Host, got.Host)
+	}
+	if got.Port != cfg.Port {
+		t.Errorf("Port: want %d, got %d", cfg.Port, got.Port)
+	}
+	if got.Username != cfg.Username {
+		t.Errorf("Username: want %q, got %q", cfg.Username, got.Username)
+	}
+	if got.Password != cfg.Password {
+		t.Errorf("Password: want %q, got %q", cfg.Password, got.Password)
+	}
+	if got.From != cfg.From {
+		t.Errorf("From: want %q, got %q", cfg.From, got.From)
+	}
+	if got.To != cfg.To {
+		t.Errorf("To: want %q, got %q", cfg.To, got.To)
+	}
+}
+
+func TestSQLiteStore_EmailConfig_Update(t *testing.T) {
+	s := newTestStore(t)
+	user, err := s.CreateUser("update@example.com", "hash")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	first := EmailConfig{Host: "smtp1.example.com", Port: 587, To: "a@example.com"}
+	if err := s.SaveEmailConfig(user.ID, first); err != nil {
+		t.Fatalf("SaveEmailConfig first: %v", err)
+	}
+
+	second := EmailConfig{Host: "smtp2.example.com", Port: 465, To: "b@example.com"}
+	if err := s.SaveEmailConfig(user.ID, second); err != nil {
+		t.Fatalf("SaveEmailConfig second: %v", err)
+	}
+
+	got, err := s.GetEmailConfig(user.ID)
+	if err != nil {
+		t.Fatalf("GetEmailConfig: %v", err)
+	}
+	if got.Host != second.Host {
+		t.Errorf("Host: want %q (second value), got %q", second.Host, got.Host)
+	}
+	if got.To != second.To {
+		t.Errorf("To: want %q (second value), got %q", second.To, got.To)
+	}
+}
+
+func TestSQLiteStore_GetAllEmailConfigs_Empty(t *testing.T) {
+	s := newTestStore(t)
+	cfgs := s.GetAllEmailConfigs()
+	if len(cfgs) != 0 {
+		t.Errorf("want nil or empty, got %d configs", len(cfgs))
+	}
+}
+
+func TestSQLiteStore_GetAllEmailConfigs_OnlyComplete(t *testing.T) {
+	s := newTestStore(t)
+
+	// User 1: config with empty host — should NOT be returned
+	u1, _ := s.CreateUser("incomplete@example.com", "hash")
+	s.SaveEmailConfig(u1.ID, EmailConfig{Host: "", Port: 587, To: "to@example.com"}) //nolint:errcheck
+
+	// User 2: complete config with host and to — SHOULD be returned
+	u2, _ := s.CreateUser("complete@example.com", "hash")
+	s.SaveEmailConfig(u2.ID, EmailConfig{Host: "smtp.example.com", Port: 587, To: "alerts@example.com"}) //nolint:errcheck
+
+	cfgs := s.GetAllEmailConfigs()
+	if len(cfgs) != 1 {
+		t.Fatalf("want 1 complete config, got %d", len(cfgs))
+	}
+	if cfgs[0].Host != "smtp.example.com" {
+		t.Errorf("Host: want smtp.example.com, got %q", cfgs[0].Host)
+	}
+}

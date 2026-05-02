@@ -88,6 +88,17 @@ export interface TopologyGraph {
   edges: TopologyEdge[]
 }
 
+// SMTP email alert config (returned by GET /api/settings/email)
+export interface EmailConfig {
+  host: string
+  port: number
+  username: string
+  password_set: boolean
+  password_preview: string
+  from: string
+  to: string
+}
+
 // One internet speed test result (returned by POST /api/speedtest and GET /api/speedtest/history)
 export interface SpeedtestResult {
   download_mbps: number   // e.g. 125.4

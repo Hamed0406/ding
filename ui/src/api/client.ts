@@ -20,7 +20,7 @@
 //   Cloudflare Tunnel strips Set-Cookie headers from certain responses.
 // ============================================================
 
-import type { ARPWatchEntry, ChangeLogEntry, Device, DeviceHistoryEntry, HistoryEntry, SpeedtestResult, Status, TopologyGraph } from '../types'
+import type { ARPWatchEntry, ChangeLogEntry, Device, DeviceHistoryEntry, EmailConfig, HistoryEntry, SpeedtestResult, Status, TopologyGraph } from '../types'
 
 // Thrown when any API call gets a 401 — lets App.tsx redirect to the login page.
 export class AuthError extends Error {
@@ -232,6 +232,29 @@ export const fetchChangeLog = (limit = 200) =>
 
 // GET /api/arpwatch — IPs that have been seen with more than one distinct MAC
 export const fetchARPWatch = () => get<ARPWatchEntry[]>('/api/arpwatch')
+
+// GET /api/settings/email
+export const fetchEmailSettings = () => get<EmailConfig>('/api/settings/email')
+
+// PUT /api/settings/email
+export async function saveEmailSettings(cfg: {
+  host: string; port: number; username: string; password: string; from: string; to: string
+}): Promise<void> {
+  const res = await send('PUT', '/api/settings/email', cfg)
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string }
+    throw new Error(body.error ?? `save failed: HTTP ${res.status}`)
+  }
+}
+
+// POST /api/settings/email/test
+export async function testEmailSettings(): Promise<void> {
+  const res = await send('POST', '/api/settings/email/test')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string }
+    throw new Error(body.error ?? `test failed: HTTP ${res.status}`)
+  }
+}
 
 // GET /api/devices/export — trigger a browser download of all devices
 // format: 'csv' (default) or 'json'
