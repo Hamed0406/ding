@@ -38,6 +38,7 @@ controller/               Go module (github.com/ding/ding)
     vendor/vendor.go      MAC vendor lookup — embedded IEEE OUI database via go:embed
     topology/topology.go  Builds node+edge graph from scan results (star topology)
     diff/diff.go          Compares []Result slices → []Change (NEW / GONE / PORTS / BACK)
+    speedtest/speedtest.go  Internet speed test — ping/download/upload via speed.cloudflare.com
     alert/alert.go        Telegram + webhook alerts; Send() fans out to all configured channels
     iface/detect.go       Auto-detects LAN interface and subnet
     api/
@@ -161,7 +162,7 @@ main.go
     → store.AllKnownIPs()       # all IPs ever seen (for NEW vs BACK detection)
     → diff.Compare()            # produce []Change (NEW / GONE / PORTS / BACK)
     → store.Save()              # write to SQLite; upserts device_seen_at (first/last seen)
-    → alert.Send()              # Telegram + webhooks for all configured users
+    → alert.Send()              # Telegram + webhooks; NEW+MAC_CHANGE always; BACK/GONE/PORTS only if bell enabled
     → broker.Publish()          # push SSE scan_result with store.AllDevices() registry
 ```
 

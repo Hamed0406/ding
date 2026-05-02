@@ -175,7 +175,10 @@ func main() {
 				}
 			}
 			for _, c := range changes {
-				if c.Kind == diff.KindMACChange || enabled[c.IP] {
+				// NEW and MAC_CHANGE are unconditional — a genuinely new device
+				// has no per-device preference yet, and a MAC change is a
+				// security event; both should always alert.
+				if c.Kind == diff.KindNew || c.Kind == diff.KindMACChange || enabled[c.IP] {
 					alertChanges = append(alertChanges, c)
 				}
 			}

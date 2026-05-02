@@ -127,7 +127,10 @@ Create a file in `internal/enrich/`, implement a function with signature `func F
 Edit `portTypes` or `vendorTypes` in `internal/classify/classify.go`. No other code changes needed.
 
 ### Adding a new alert channel
-Add a sender function to `internal/alert/alert.go` and call it from `alert.Send()`. The `changes` slice passed to `Send()` is already filtered to devices with notifications enabled.
+Add a sender function to `internal/alert/alert.go` and call it from `alert.Send()`. The `changes` slice passed to `Send()` is already filtered by `main.go` using these rules:
+- `KindNew` — always included (first-ever appearance; no per-device preference exists yet)
+- `KindMACChange` — always included (security event)
+- All other kinds — included only if the device has `Notify = true`
 
 ### Adding a new settings section
 Append to the `SECTIONS` array in `ui/src/components/SettingsPage.tsx` and add a matching panel component below. Follow the Telegram or Webhook section as a template (GET/PUT/test handler pattern).
@@ -144,6 +147,8 @@ Append `_, _ = db.Exec(...)` calls to `sqliteMigrate()` in `sqlite_store.go`. Us
 
 ### Notification opt-in storage
 The `device_notify` table stores only overrides from the default. Absence of a row means notifications **disabled**. `COALESCE(n.enabled, 0)` in the `AllDevices` query implements this.
+
+This per-device flag only controls `BACK`, `GONE`, and `PORTS` events. `NEW` and `MAC_CHANGE` events are always sent regardless — see the alert filtering logic in `cmd/ding/main.go`.
 
 ### Per-user config storage
 Telegram token/chat ID and webhook URL are columns on the `users` table. `GetAllTelegramConfigs()` and `GetAllWebhookURLs()` collect all configured users at alert time; fall back to `DING_TELEGRAM_TOKEN` env var if none are set.

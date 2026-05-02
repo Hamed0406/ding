@@ -8,11 +8,66 @@ A fast network scanner that answers: who is on your network, what are they, and 
 
 ## Install
 
-### Docker (recommended — Linux host)
+Pick your platform:
 
-Pre-built images are published to **[hamed0406/ding](https://hub.docker.com/r/hamed0406/ding)** and **[ghcr.io/hamed0406/ding](https://github.com/hamed0406/ding/pkgs/container/ding)** for both `linux/amd64` and `linux/arm64` (Raspberry Pi-friendly). No source checkout needed.
+- [Linux — Docker / Docker Compose](#linux--docker--docker-compose-recommended)
+- [Linux — native binary](#linux--native-binary)
+- [Linux — Podman](#linux--podman)
+- [Raspberry Pi](#raspberry-pi)
+- [macOS](#macos)
+- [Windows](#windows)
 
-**One-liner:**
+> **Why Docker on Windows won't work for scanning:** Docker Desktop runs inside a Linux VM. `network_mode: host` attaches the VM's virtual NIC, not your real Wi-Fi/Ethernet adapter — ARP packets never reach your LAN. Use the native Windows binary instead.
+
+---
+
+### Linux — Docker / Docker Compose (recommended)
+
+Pre-built images for `linux/amd64` and `linux/arm64` are published on **[Docker Hub](https://hub.docker.com/r/hamed0406/ding)** and **[GHCR](https://github.com/hamed0406/ding/pkgs/container/ding)**. No source checkout needed.
+
+**1. Create a working directory and config file**
+
+```bash
+mkdir ding && cd ding
+```
+
+Save the following as `docker-compose.yml`:
+
+```yaml
+services:
+  ding:
+    image: hamed0406/ding:latest
+    network_mode: host        # required — ARP must reach the physical LAN
+    cap_add:
+      - NET_RAW               # raw sockets for ARP / ICMP
+      - NET_ADMIN             # interface access
+    volumes:
+      - ./data:/data          # scan history, users, speed-test results
+    environment:
+      DING_SCAN_INTERVAL: "60s"
+      # DING_INTERFACE: eth0  # uncomment if auto-detect picks the wrong NIC
+      # DING_PORTS: "22,80,443,554,8000,8080,8443"
+    restart: unless-stopped
+```
+
+**2. Start**
+
+```bash
+docker compose up -d
+```
+
+Open **http://localhost:8081** — you'll be prompted to create an account on first visit.
+
+**3. Day-to-day commands**
+
+```bash
+docker compose logs -f                           # live logs
+docker compose pull && docker compose up -d      # upgrade to latest
+docker compose down                              # stop
+docker compose down -v                           # stop + wipe data
+```
+
+**4. One-liner (no Compose)**
 
 ```bash
 docker run -d \
@@ -20,99 +75,353 @@ docker run -d \
   --network host \
   --cap-add NET_RAW --cap-add NET_ADMIN \
   -v ding-data:/data \
+  -e DING_SCAN_INTERVAL=60s \
   hamed0406/ding:latest
 ```
 
-**docker-compose (recommended):**
-
-Save this as `docker-compose.yml`:
-
-```yaml
-services:
-  ding:
-    image: hamed0406/ding:latest
-    network_mode: host          # ARP needs to see the LAN
-    cap_add:
-      - NET_RAW
-      - NET_ADMIN
-    volumes:
-      - ./data:/data
-    environment:
-      DING_PORTS: "22,80,443,554,8000,8080,8443"
-      DING_HTTP_ADDR: ":8081"
-      DING_SCAN_INTERVAL: "60s"
-    restart: unless-stopped
-```
-
-```bash
-docker compose up -d                            # start
-docker compose logs -f                          # tail logs
-docker compose pull && docker compose up -d     # upgrade to newest :latest
-docker compose down                             # stop
-```
-
-**Podman:**
-
-```bash
-# Option A — podman-compose (same workflow as Docker)
-pip install podman-compose
-sudo podman-compose up --build
-
-# Option B — Quadlet (systemd service)
-sudo podman build -t ding .
-# Place ding.container in /etc/containers/systemd/ — see docs/quadlet below
-sudo systemctl daemon-reload && sudo systemctl enable --now ding
-```
-
-> **Note:** Docker/Podman on Windows runs inside a Linux VM. `network_mode: host` gives the VM's virtual NIC, not your real LAN — ARP scanning won't find your devices. Use native binaries on Windows instead.
-
 ---
 
-### Native binaries (Linux, macOS, Windows)
+### Linux — native binary
 
-Download the latest release from the [GitHub Releases](../../releases/latest) page. Each archive contains two binaries: `scanner` (Rust) and `ding` (Go controller with UI embedded).
+Use this if you don't want Docker, or want to run Ding as a `systemd` service.
 
-| Platform | File | Notes |
-|---|---|---|
-| Linux x86\_64 | `ding-linux-amd64.tar.gz` | |
-| Linux ARM64 | `ding-linux-arm64.tar.gz` | Raspberry Pi, NAS |
-| macOS Intel | `ding-macos-amd64.tar.gz` | Needs `sudo` |
-| macOS Apple Silicon | `ding-macos-arm64.tar.gz` | Needs `sudo` |
-| Windows x86\_64 | `ding-windows-amd64.zip` | Requires [Npcap](https://npcap.com) + run as Administrator |
-
-**Linux / macOS:**
+**1. Download and extract**
 
 ```bash
+curl -LO https://github.com/hamed0406/ding/releases/latest/download/ding-linux-amd64.tar.gz
+sha256sum -c sha256sums.txt          # verify integrity
 tar xzf ding-linux-amd64.tar.gz
-sudo ./ding
+sudo mv ding scanner /usr/local/bin/
+```
+
+> ARM64 (Raspberry Pi, NAS): use `ding-linux-arm64.tar.gz` instead.
+
+**2. Run manually**
+
+```bash
+sudo ding
 # UI at http://localhost:8081
 ```
 
-**Windows:**
-
-1. Install [Npcap](https://npcap.com) (free)
-2. Unzip `ding-windows-amd64.zip`
-3. Run `ding.exe` as Administrator
-
-**Verify download integrity:**
+Configuration is done via environment variables:
 
 ```bash
-sha256sum -c sha256sums.txt
+sudo DING_SCAN_INTERVAL=60s DING_HTTP_ADDR=:8081 ding
+```
+
+**3. Run as a systemd service (auto-start on boot)**
+
+```bash
+sudo useradd -r -s /bin/false ding    # dedicated service user
+sudo mkdir -p /var/lib/ding
+```
+
+Save as `/etc/systemd/system/ding.service`:
+
+```ini
+[Unit]
+Description=Ding network scanner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ding
+Environment=DING_DATA_PATH=/var/lib/ding/ding.db
+Environment=DING_HTTP_ADDR=:8081
+Environment=DING_SCAN_INTERVAL=60s
+Restart=on-failure
+RestartSec=5s
+# Raw socket access — required for ARP/ICMP
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now ding
+sudo systemctl status ding
+journalctl -u ding -f           # live logs
+```
+
+**4. Upgrade**
+
+```bash
+curl -LO https://github.com/hamed0406/ding/releases/latest/download/ding-linux-amd64.tar.gz
+tar xzf ding-linux-amd64.tar.gz
+sudo systemctl stop ding
+sudo mv ding scanner /usr/local/bin/
+sudo systemctl start ding
 ```
 
 ---
 
-### Picking an image tag
+### Linux — Podman
+
+**Option A — podman-compose (same workflow as Docker Compose)**
+
+```bash
+pip install podman-compose
+mkdir ding && cd ding
+# create the same docker-compose.yml shown in the Docker section above
+sudo podman-compose up -d
+```
+
+**Option B — Podman Quadlet (native systemd integration, no Docker Compose needed)**
+
+Create `/etc/containers/systemd/ding.container`:
+
+```ini
+[Unit]
+Description=Ding network scanner
+After=network-online.target
+
+[Container]
+Image=docker.io/hamed0406/ding:latest
+Network=host
+AddCapability=CAP_NET_RAW CAP_NET_ADMIN
+Volume=/var/lib/ding:/data
+Environment=DING_SCAN_INTERVAL=60s
+Environment=DING_HTTP_ADDR=:8081
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target default.target
+```
+
+```bash
+sudo mkdir -p /var/lib/ding
+sudo systemctl daemon-reload
+sudo systemctl enable --now ding
+sudo systemctl status ding
+```
+
+Podman automatically pulls the image on first start and handles updates with `podman auto-update`.
+
+---
+
+### Raspberry Pi
+
+Ding ships a native `linux/arm64` binary — tested on Raspberry Pi 3, 4, and 5 running Raspberry Pi OS (64-bit) or Ubuntu.
+
+**Docker Compose (easiest)**
+
+```bash
+# Install Docker if not present
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER   # log out and back in after this
+
+mkdir ding && cd ding
+# create docker-compose.yml as shown above (same file, works on arm64 too)
+docker compose up -d
+```
+
+Open **http://<pi-ip>:8081** from any device on your network.
+
+**Native binary**
+
+```bash
+curl -LO https://github.com/hamed0406/ding/releases/latest/download/ding-linux-arm64.tar.gz
+tar xzf ding-linux-arm64.tar.gz
+sudo mv ding scanner /usr/local/bin/
+sudo ding
+```
+
+Then follow the systemd service steps in the [Linux — native binary](#linux--native-binary) section.
+
+**Tips for Raspberry Pi**
+
+- Set a static IP on your Pi so the UI URL never changes.
+- The default 512 MB swap on older Pi models is enough for normal use.
+- If you have multiple NICs (e.g. both `eth0` and `wlan0`), set `DING_INTERFACE` explicitly.
+
+---
+
+### macOS
+
+**Prerequisite:** raw socket access requires `sudo`. No other special drivers needed — macOS has BPF support built in.
+
+**1. Download and extract**
+
+```bash
+# Apple Silicon (M1/M2/M3/M4)
+curl -LO https://github.com/hamed0406/ding/releases/latest/download/ding-macos-arm64.tar.gz
+tar xzf ding-macos-arm64.tar.gz
+
+# Intel Mac
+curl -LO https://github.com/hamed0406/ding/releases/latest/download/ding-macos-amd64.tar.gz
+tar xzf ding-macos-amd64.tar.gz
+```
+
+**2. Remove quarantine and run**
+
+macOS Gatekeeper will block unsigned binaries downloaded from the internet. Remove the quarantine attribute before running:
+
+```bash
+xattr -d com.apple.quarantine ding scanner
+sudo ./ding
+```
+
+Open **http://localhost:8081**.
+
+**3. Pass configuration**
+
+```bash
+sudo DING_SCAN_INTERVAL=60s DING_HTTP_ADDR=:8081 ./ding
+```
+
+Or create a `.env`-style shell script:
+
+```bash
+#!/bin/sh
+export DING_SCAN_INTERVAL=60s
+export DING_HTTP_ADDR=:8081
+export DING_DATA_PATH=/usr/local/var/ding/ding.db
+exec sudo -E /usr/local/bin/ding
+```
+
+**4. Run as a launchd service (auto-start on login)**
+
+Save as `~/Library/LaunchAgents/com.ding.scanner.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>        <string>com.ding.scanner</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/ding</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DING_SCAN_INTERVAL</key> <string>60s</string>
+    <key>DING_HTTP_ADDR</key>     <string>:8081</string>
+    <key>DING_DATA_PATH</key>     <string>/usr/local/var/ding/ding.db</string>
+  </dict>
+  <key>RunAtLoad</key>    <true/>
+  <key>KeepAlive</key>    <true/>
+  <key>StandardOutPath</key> <string>/usr/local/var/log/ding.log</string>
+  <key>StandardErrorPath</key><string>/usr/local/var/log/ding.log</string>
+</dict>
+</plist>
+```
+
+```bash
+sudo mkdir -p /usr/local/bin /usr/local/var/ding /usr/local/var/log
+sudo cp ding scanner /usr/local/bin/
+launchctl load ~/Library/LaunchAgents/com.ding.scanner.plist
+```
+
+> The plist runs the binary; the binary itself uses raw sockets which need root — macOS will prompt for your password on first launch.
+
+**5. Upgrade**
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.ding.scanner.plist
+# replace binaries
+launchctl load ~/Library/LaunchAgents/com.ding.scanner.plist
+```
+
+---
+
+### Windows
+
+> Docker Desktop on Windows **will not work for scanning** — containers run in a Linux VM and ARP packets can't reach your physical network. Use the native binary.
+
+**Prerequisites**
+
+- Windows 10 / 11 (x86-64)
+- [Npcap](https://npcap.com) — free packet-capture driver required by the scanner. Download and install before running Ding.
+  - During install, check **"Install Npcap in WinPcap API-compatible mode"**
+
+**1. Download and extract**
+
+Download `ding-windows-amd64.zip` from the [latest release](../../releases/latest) and extract it anywhere, e.g. `C:\ding\`.
+
+**2. Find your interface name**
+
+Open PowerShell and run:
+
+```powershell
+Get-NetAdapter | Select-Object Name, InterfaceDescription, Status
+```
+
+Note the **Name** of your active adapter (e.g. `Wi-Fi`, `Ethernet`).
+
+**3. Run as Administrator**
+
+Right-click PowerShell → **Run as Administrator**, then:
+
+```powershell
+cd C:\ding
+$env:DING_INTERFACE    = "Wi-Fi"      # replace with your adapter name
+$env:DING_SCAN_INTERVAL= "60s"
+$env:DING_HTTP_ADDR    = ":8081"
+.\ding.exe
+```
+
+Open **http://localhost:8081**.
+
+**4. Run as a Windows Service (auto-start on boot)**
+
+Use the built-in `sc` command or [NSSM](https://nssm.cc) (Non-Sucking Service Manager):
+
+```powershell
+# Download nssm, then:
+nssm install Ding C:\ding\ding.exe
+nssm set Ding AppEnvironmentExtra DING_INTERFACE=Wi-Fi DING_SCAN_INTERVAL=60s DING_HTTP_ADDR=:8081
+nssm set Ding AppDirectory C:\ding
+nssm set Ding ObjectName LocalSystem    # run as SYSTEM for raw socket access
+nssm start Ding
+```
+
+Or with the built-in `sc`:
+
+```powershell
+sc.exe create Ding binPath= "C:\ding\ding.exe" start= auto obj= LocalSystem
+sc.exe start Ding
+```
+
+Configure environment variables for the `Ding` service key in the registry at  
+`HKLM\SYSTEM\CurrentControlSet\Services\Ding\Environment`.
+
+**5. Firewall**
+
+If you want to access the UI from another machine on the network, allow inbound traffic on port 8081:
+
+```powershell
+New-NetFirewallRule -DisplayName "Ding" -Direction Inbound -Protocol TCP -LocalPort 8081 -Action Allow
+```
+
+**6. Upgrade**
+
+```powershell
+sc.exe stop Ding
+# replace ding.exe and scanner.exe
+sc.exe start Ding
+```
+
+---
+
+### Docker image tags
 
 | Tag | When to use |
 |---|---|
 | `1.2.3` | **Production.** Pinned, immutable, no surprise upgrades. |
 | `1.2` | Latest patch of `1.2.x` — auto-upgrades on bug fixes |
 | `1` | Latest `1.x.x` release |
-| `latest` | Demos. Moves under you — not for production. |
+| `latest` | Demos and quick tests. Moves under you — not for production. |
 | `main-<sha>` | Bleeding-edge build from `main`. Unstable. |
 
-A single Docker tag is multi-arch — Docker picks `amd64` or `arm64` automatically.
+A single tag is multi-arch — Docker and Podman pick `amd64` or `arm64` automatically.
 
 ---
 
@@ -129,7 +438,7 @@ The UI is a React PWA bundled into the Go binary. It works in any browser and is
 | **Device labelling** | Assign a custom name ("Living Room TV") that persists across scans |
 | **Per-device port scan** | Scan one device's ports on demand — no full network scan needed |
 | **Wake-on-LAN** | Send a magic packet to wake an offline device (requires known MAC) |
-| **Notification opt-in** | Bell icon on each card — off by default; click to enable alerts per device |
+| **Notification opt-in** | Bell icon on each card — off by default; click to enable alerts per device. Brand-new devices (first-ever appearance) always alert regardless of this setting |
 | **Topology map** | Interactive SVG star-topology map; switch between Grid and Topology views |
 | **Changes feed** | NEW / GONE / BACK / PORTS changes with colour coding |
 | **Passive detection** | Devices that send ARP traffic appear instantly without waiting for a scan |
@@ -226,7 +535,17 @@ SSE event types: `connected`, `scan_start`, `scan_result`, `scan_error`, `device
 
 ## Alerts
 
-Ding sends alerts when a tracked device joins, leaves, or changes ports. Notifications are **opt-in per device** — disabled by default. Enable them by clicking the bell icon on a device card (turns cyan when active).
+Ding sends alerts when a tracked device joins, leaves, or changes ports.
+
+**Two alert tiers:**
+
+| Tier | When | Opt-out? |
+|---|---|---|
+| **Always-on** | Brand-new device (first time ever seen on your network) | No — you always want to know |
+| **Always-on** | ARP MAC change on a known IP (possible ARP spoofing) | No — security event |
+| **Per-device** | Device returns, goes offline, or changes open ports | Yes — bell icon on each card |
+
+Per-device notifications are **disabled by default**. Enable them by clicking the bell icon on a device card (turns cyan when active).
 
 ### Telegram
 
@@ -292,7 +611,7 @@ Go controller (ding)
   ├── diffs results         → NEW / BACK / GONE / PORTS changes
   ├── saves to /data/ding.db (SQLite) + updates first/last-seen timestamps
   ├── pushes scan events to all SSE clients
-  └── sends Telegram + webhook alerts (per-user config; bell-enabled devices only)
+  └── sends Telegram + webhook alerts (per-user config; NEW device always; bell-enabled devices for BACK/GONE/PORTS)
 
 Passive ARP listener (always running)
   └── watches ARP traffic → device_seen SSE events without waiting for scan
