@@ -25,3 +25,5 @@ controller/internal/api/static/*
 # Claude Code
 CLAUDE.md
 .claude/
+
+controller/coverage.out

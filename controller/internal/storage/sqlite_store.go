@@ -33,8 +33,8 @@ import (
 // SQLiteStore implements Store using a local SQLite database.
 // Schema is normalized: one row per device per scan, enabling future analytics.
 type SQLiteStore struct {
-	db        *sql.DB
-	secretKey string // AES-256-GCM key for encrypting SMTP passwords; empty = no encryption
+	db         *sql.DB
+	derivedKey []byte // pre-derived AES-256 key for SMTP password encryption; nil = disabled
 }
 
 // NewSQLite opens (or creates) a SQLite database at path and runs migrations.
@@ -60,8 +60,8 @@ func NewSQLite(path string, secretKey ...string) (*SQLiteStore, error) {
 		return nil, err
 	}
 	s := &SQLiteStore{db: db}
-	if len(secretKey) > 0 {
-		s.secretKey = secretKey[0]
+	if len(secretKey) > 0 && secretKey[0] != "" {
+		s.derivedKey = DeriveKey(secretKey[0])
 	}
 	return s, nil
 }

@@ -5,11 +5,13 @@ import (
 	"time"
 )
 
+// testKey derives a key once for all crypto tests (avoids repeated PBKDF2 calls).
+var testKey = DeriveKey("test-secret-key")
+
 func TestEncryptDecryptRoundtrip(t *testing.T) {
-	key := "test-secret-key"
 	plain := "hunter2"
 
-	enc, err := encryptPassword(key, plain)
+	enc, err := encryptPassword(testKey, plain)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
@@ -20,7 +22,7 @@ func TestEncryptDecryptRoundtrip(t *testing.T) {
 		t.Fatalf("encrypted value missing prefix: %q", enc[:7])
 	}
 
-	got, err := decryptPassword(key, enc)
+	got, err := decryptPassword(testKey, enc)
 	if err != nil {
 		t.Fatalf("decrypt: %v", err)
 	}
@@ -31,7 +33,7 @@ func TestEncryptDecryptRoundtrip(t *testing.T) {
 
 func TestDecrypt_LegacyPlaintext(t *testing.T) {
 	// Values stored before encryption was enabled pass through unchanged.
-	got, err := decryptPassword("any-key", "my-plain-password")
+	got, err := decryptPassword(testKey, "my-plain-password")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -40,9 +42,9 @@ func TestDecrypt_LegacyPlaintext(t *testing.T) {
 	}
 }
 
-func TestEncrypt_EmptyKey(t *testing.T) {
+func TestEncrypt_NilKey(t *testing.T) {
 	// No key → returns plaintext unchanged (encryption disabled).
-	got, err := encryptPassword("", "secret")
+	got, err := encryptPassword(nil, "secret")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,12 +54,40 @@ func TestEncrypt_EmptyKey(t *testing.T) {
 }
 
 func TestEncrypt_EmptyPassword(t *testing.T) {
-	got, err := encryptPassword("key", "")
+	got, err := encryptPassword(testKey, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got != "" {
 		t.Errorf("empty password should stay empty, got %q", got)
+	}
+}
+
+func TestDecrypt_NoKeyForEncrypted(t *testing.T) {
+	// Encrypted value but no key → error, not gibberish.
+	enc, err := encryptPassword(testKey, "secret")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	_, err = decryptPassword(nil, enc)
+	if err == nil {
+		t.Fatal("expected error when decrypting without key")
+	}
+}
+
+func TestDecrypt_CorruptedCiphertext(t *testing.T) {
+	_, err := decryptPassword(testKey, encPrefix+"!!!not-valid-base64!!!")
+	if err == nil {
+		t.Fatal("expected error for corrupted ciphertext")
+	}
+}
+
+func TestDecrypt_TooShortCiphertext(t *testing.T) {
+	// "tooshort" is 8 bytes — less than the 12-byte AES-GCM nonce.
+	short := encPrefix + "dG9vc2hvcnQ="
+	_, err := decryptPassword(testKey, short)
+	if err == nil {
+		t.Fatal("expected error for ciphertext shorter than nonce")
 	}
 }
 

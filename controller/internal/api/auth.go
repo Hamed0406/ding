@@ -173,7 +173,7 @@ func fetchGitHubUser(accessToken string) (email, id string, err error) {
 	req2, _ := http.NewRequest("GET", "https://api.github.com/user/emails", nil)
 	req2.Header.Set("Authorization", "token "+accessToken)
 	req2.Header.Set("Accept", "application/vnd.github.v3+json")
-	resp2, err := http.DefaultClient.Do(req2)
+	resp2, err := oauthHTTPClient.Do(req2)
 	if err != nil {
 		return "", idStr, err
 	}
