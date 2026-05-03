@@ -190,7 +190,7 @@ func (s *SQLiteStore) GetAllWebhookURLs() []string {
 // Passing an empty Host clears the config (disables email alerts for that user).
 // The password is encrypted with AES-256-GCM if DING_SECRET_KEY is configured.
 func (s *SQLiteStore) SaveEmailConfig(userID int64, cfg EmailConfig) error {
-	enc, err := encryptPassword(s.derivedKey, cfg.Password)
+	enc, err := encryptPassword(s.passphrase, cfg.Password)
 	if err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func (s *SQLiteStore) GetEmailConfig(userID int64) (EmailConfig, error) {
 	if err != nil {
 		return cfg, err
 	}
-	cfg.Password, err = decryptPassword(s.derivedKey, storedPw)
+	cfg.Password, err = decryptPassword(s.passphrase, storedPw)
 	return cfg, err
 }
 
@@ -245,7 +245,7 @@ func (s *SQLiteStore) GetAllEmailConfigs() []EmailConfig {
 		if err := rows.Scan(&cfg.Host, &cfg.Port, &cfg.Username, &storedPw, &cfg.From, &cfg.To); err != nil {
 			continue
 		}
-		cfg.Password, _ = decryptPassword(s.derivedKey, storedPw)
+		cfg.Password, _ = decryptPassword(s.passphrase, storedPw)
 		cfgs = append(cfgs, cfg)
 	}
 	return cfgs

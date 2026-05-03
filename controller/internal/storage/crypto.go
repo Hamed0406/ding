@@ -13,14 +13,25 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
-const encPrefix = "enc:v1:"
+const (
+	encPrefix        = "enc:v1:"
+	pbkdf2Iterations = 600_000
+	saltSize         = 16
+)
 
-// encryptPassword encrypts plaintext using AES-256-GCM with a pre-derived key.
-// Returns plaintext unchanged when key is nil (encryption disabled).
-func encryptPassword(key []byte, plaintext string) (string, error) {
-	if len(key) == 0 || plaintext == "" {
+// encryptPassword encrypts plaintext with AES-256-GCM. A random salt is generated
+// per call and embedded in the output so each stored value is independently protected.
+// Output format: "enc:v1:" + base64(salt[16] + nonce[12] + gcm-ciphertext).
+// Returns plaintext unchanged when passphrase is empty (encryption disabled).
+func encryptPassword(passphrase, plaintext string) (string, error) {
+	if passphrase == "" || plaintext == "" {
 		return plaintext, nil
 	}
+	salt := make([]byte, saltSize)
+	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+		return "", err
+	}
+	key := pbkdf2.Key([]byte(passphrase), salt, pbkdf2Iterations, 32, sha256.New)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
@@ -34,23 +45,28 @@ func encryptPassword(key []byte, plaintext string) (string, error) {
 		return "", err
 	}
 	sealed := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
-	return encPrefix + base64.StdEncoding.EncodeToString(sealed), nil
+	payload := append(salt, sealed...)
+	return encPrefix + base64.StdEncoding.EncodeToString(payload), nil
 }
 
-// decryptPassword reverses encryptPassword. Values without the "enc:v1:" prefix
-// are returned unchanged (legacy plaintext — backwards compatible).
-// Returns an error only when the value is prefixed but decryption fails.
-func decryptPassword(key []byte, value string) (string, error) {
+// decryptPassword reverses encryptPassword. Values without the "enc:v1:" prefix are
+// returned unchanged (legacy plaintext — backwards compatible with pre-encryption data).
+func decryptPassword(passphrase, value string) (string, error) {
 	if !strings.HasPrefix(value, encPrefix) {
-		return value, nil // plaintext (no key was set when it was saved)
+		return value, nil
 	}
-	if len(key) == 0 {
+	if passphrase == "" {
 		return "", errors.New("DING_SECRET_KEY required to decrypt stored password")
 	}
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(value, encPrefix))
+	payload, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(value, encPrefix))
 	if err != nil {
 		return "", err
 	}
+	if len(payload) < saltSize {
+		return "", errors.New("ciphertext too short")
+	}
+	salt, data := payload[:saltSize], payload[saltSize:]
+	key := pbkdf2.Key([]byte(passphrase), salt, pbkdf2Iterations, 32, sha256.New)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
@@ -59,22 +75,13 @@ func decryptPassword(key []byte, value string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(raw) < gcm.NonceSize() {
+	if len(data) < gcm.NonceSize() {
 		return "", errors.New("ciphertext too short")
 	}
-	nonce, ciphertext := raw[:gcm.NonceSize()], raw[gcm.NonceSize():]
+	nonce, ciphertext := data[:gcm.NonceSize()], data[gcm.NonceSize():]
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return "", err
 	}
 	return string(plaintext), nil
-}
-
-// DeriveKey produces a 32-byte AES-256 key from a passphrase using PBKDF2-SHA256.
-// The salt is application-specific and fixed; security comes from the passphrase entropy
-// (DING_SECRET_KEY is documented as a 32-byte random value from openssl rand -base64 32).
-// 260000 iterations matches the 2023 OWASP PBKDF2-SHA256 recommendation.
-// Call once at startup and reuse the returned bytes — do not call per request.
-func DeriveKey(passphrase string) []byte {
-	return pbkdf2.Key([]byte(passphrase), []byte("ding:v1:email-password-key"), 260000, 32, sha256.New)
 }
