@@ -22,6 +22,7 @@ import (
 type testEnv struct {
 	ts    *httptest.Server
 	store *storage.SQLiteStore
+	srv   *api.Server
 }
 
 // newEnv spins up a real HTTP server backed by in-memory SQLite.
@@ -41,7 +42,7 @@ func newEnv(t *testing.T) *testEnv {
 	)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
-	return &testEnv{ts: ts, store: store}
+	return &testEnv{ts: ts, store: store, srv: srv}
 }
 
 // register creates a new user and returns the bearer token.
@@ -828,6 +829,310 @@ func TestBodySizeLimit(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Errorf("oversized body: want 400 or 413, got %d", resp.StatusCode)
 	}
+}
+
+// ── Exchange token ────────────────────────────────────────────────────────────
+
+func TestExchange_InvalidToken(t *testing.T) {
+	e := newEnv(t)
+	resp, err := http.Post(e.ts.URL+"/api/auth/exchange", "application/json",
+		strings.NewReader(`{"token":"not-a-real-token"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("want 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestExchange_MissingToken(t *testing.T) {
+	e := newEnv(t)
+	resp, err := http.Post(e.ts.URL+"/api/auth/exchange", "application/json",
+		strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+
+func TestExport_CSV(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+
+	mac := "aa:bb:cc:dd:ee:ff"
+	host := "router"
+	e.store.Save([]scanner.Result{{IP: "192.168.1.1", Alive: true, MAC: &mac, Hostname: &host}}) //nolint:errcheck
+
+	resp := e.authGet(t, tok, "/api/devices/export")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/csv") {
+		t.Errorf("want text/csv, got %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "192.168.1.1") {
+		t.Error("CSV should contain device IP")
+	}
+}
+
+func TestExport_JSON(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authGet(t, tok, "/api/devices/export?format=json")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Errorf("want application/json, got %q", ct)
+	}
+}
+
+// ── Changes & ARPWatch ────────────────────────────────────────────────────────
+
+func TestChanges_Empty(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authGet(t, tok, "/api/changes")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	var result []any
+	json.NewDecoder(resp.Body).Decode(&result)
+	if len(result) != 0 {
+		t.Errorf("want empty array, got %d items", len(result))
+	}
+}
+
+func TestARPWatch_Empty(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authGet(t, tok, "/api/arpwatch")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	var result []any
+	json.NewDecoder(resp.Body).Decode(&result)
+	if len(result) != 0 {
+		t.Errorf("want empty array, got %d items", len(result))
+	}
+}
+
+// ── Device scan ───────────────────────────────────────────────────────────────
+
+func TestDeviceScan_ReturnsOpenPorts(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	// Scanning a valid IP returns 200 with open_ports field (may be empty).
+	resp := e.authPost(t, tok, "/api/devices/127.0.0.1/scan", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+	if _, ok := result["open_ports"]; !ok {
+		t.Error("response missing open_ports field")
+	}
+	if result["ip"] != "127.0.0.1" {
+		t.Errorf("ip: want 127.0.0.1, got %v", result["ip"])
+	}
+}
+
+// ── Wake-on-LAN ───────────────────────────────────────────────────────────────
+
+func TestWake_UnknownDevice(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	// Device not in store → no MAC → 422
+	resp := e.authPost(t, tok, "/api/devices/192.168.1.99/wake", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422, got %d", resp.StatusCode)
+	}
+}
+
+func TestWake_KnownDevice(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+
+	mac := "aa:bb:cc:dd:ee:01"
+	e.store.Save([]scanner.Result{{IP: "192.168.1.50", Alive: true, MAC: &mac}}) //nolint:errcheck
+
+	resp := e.authPost(t, tok, "/api/devices/192.168.1.50/wake", "")
+	defer resp.Body.Close()
+	// Should succeed (UDP broadcast) or fail with 500 if broadcast is blocked in CI;
+	// either way, it must not return 422 (MAC is known).
+	if resp.StatusCode == http.StatusUnprocessableEntity {
+		t.Fatal("wake: 422 unexpected — MAC is known")
+	}
+}
+
+// ── Webhook GET ───────────────────────────────────────────────────────────────
+
+func TestGetWebhook_Default(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authGet(t, tok, "/api/settings/webhook")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result["url_set"] != false {
+		t.Errorf("url_set: want false, got %v", result["url_set"])
+	}
+}
+
+// ── Test-send endpoints (no-config error path) ────────────────────────────────
+
+func TestTestWebhook_NoConfig(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authPost(t, tok, "/api/settings/webhook/test", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400 when no webhook configured, got %d", resp.StatusCode)
+	}
+}
+
+func TestTestTelegram_NoConfig(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authPost(t, tok, "/api/settings/telegram/test", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400 when no Telegram configured, got %d", resp.StatusCode)
+	}
+}
+
+func TestTestEmail_NoConfig(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authPost(t, tok, "/api/settings/email/test", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400 when no email configured, got %d", resp.StatusCode)
+	}
+}
+
+// ── Status with a scan record ─────────────────────────────────────────────────
+
+func TestStatus_WithLastScan(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	e.store.Save(nil) //nolint:errcheck
+
+	resp := e.authGet(t, tok, "/api/status")
+	defer resp.Body.Close()
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result["last_scan"] == nil {
+		t.Error("last_scan should be set after a scan")
+	}
+}
+
+// ── Webhook GET after save ────────────────────────────────────────────────────
+
+func TestGetWebhook_AfterSave(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	e.authPut(t, tok, "/api/settings/webhook", `{"url":"https://example.com/hook"}`).Body.Close()
+
+	resp := e.authGet(t, tok, "/api/settings/webhook")
+	defer resp.Body.Close()
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result["url_set"] != true {
+		t.Errorf("url_set: want true after save, got %v", result["url_set"])
+	}
+}
+
+// ── Changes with limit param ──────────────────────────────────────────────────
+
+func TestChanges_LimitParam(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authGet(t, tok, "/api/changes?limit=10")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+}
+
+// ── Register bad JSON ─────────────────────────────────────────────────────────
+
+func TestRegister_BadJSON(t *testing.T) {
+	e := newEnv(t)
+	resp, err := http.Post(e.ts.URL+"/api/auth/register", "application/json",
+		strings.NewReader("not-json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", resp.StatusCode)
+	}
+}
+
+// ── Label too long ────────────────────────────────────────────────────────────
+
+func TestSetLabel_TooLong(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	name := strings.Repeat("x", 256)
+	resp := e.authPut(t, tok, "/api/devices/192.168.1.1/label",
+		fmt.Sprintf(`{"name":%q}`, name))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400 for label > 255 chars, got %d", resp.StatusCode)
+	}
+}
+
+// ── SetNotify bad JSON ────────────────────────────────────────────────────────
+
+func TestSetNotify_BadJSON(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authPut(t, tok, "/api/devices/192.168.1.1/notify", "not-json")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400 for bad JSON, got %d", resp.StatusCode)
+	}
+}
+
+// ── DeviceSeenEvent ───────────────────────────────────────────────────────────
+
+func TestDeviceSeenEvent(t *testing.T) {
+	ev := api.DeviceSeenEvent("192.168.1.1", "aa:bb:cc:dd:ee:ff", diff.KindNew)
+	if ev.IP != "192.168.1.1" {
+		t.Errorf("IP: want 192.168.1.1, got %q", ev.IP)
+	}
+	if ev.MAC != "aa:bb:cc:dd:ee:ff" {
+		t.Errorf("MAC: want aa:bb:cc:dd:ee:ff, got %q", ev.MAC)
+	}
+}
+
+// ── TriggerScan ───────────────────────────────────────────────────────────────
+
+func TestTriggerScan_DoesNotPanic(t *testing.T) {
+	e := newEnv(t)
+	// TriggerScan starts a background scan; calling it twice is safe (second is a no-op).
+	e.srv.TriggerScan()
+	e.srv.TriggerScan()
+	// Wait for the fast no-op scan to finish.
+	time.Sleep(50 * time.Millisecond)
 }
 
 // compile-time assertion: these imports are used

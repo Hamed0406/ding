@@ -73,6 +73,9 @@ type sessionEntry struct {
 	userID int64
 }
 
+// randPanicMsg is prepended to crypto/rand errors in panics.
+const randPanicMsg = "crypto/rand: "
+
 // sessionStore holds active login tokens (random 32-byte hex, 24h expiry).
 type sessionStore struct {
 	mu     sync.Mutex
@@ -108,7 +111,7 @@ func (ss *sessionStore) startCleanup(ctx context.Context) {
 func (ss *sessionStore) create(userID int64) string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand: " + err.Error())
+		panic(randPanicMsg + err.Error())
 	}
 	t := hex.EncodeToString(b)
 	ss.mu.Lock()
@@ -231,7 +234,7 @@ type exchangeEntry struct {
 func (s *Server) newExchangeToken(userID int64) string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand: " + err.Error())
+		panic(randPanicMsg + err.Error())
 	}
 	token := hex.EncodeToString(b)
 	s.exchangeTokens.Store(token, exchangeEntry{expiry: time.Now().Add(60 * time.Second), userID: userID})
@@ -256,7 +259,7 @@ func (s *Server) consumeExchangeToken(token string) (int64, bool) {
 func (s *Server) newOAuthState() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand: " + err.Error())
+		panic(randPanicMsg + err.Error())
 	}
 	state := hex.EncodeToString(b)
 	s.oauthStates.Store(state, time.Now().Add(10*time.Minute))
