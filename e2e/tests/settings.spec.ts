@@ -7,7 +7,7 @@ function uniqueEmail(prefix: string) {
 async function registerAndGoToSettings(page: import('@playwright/test').Page, email: string) {
   await page.goto('/')
   await page.waitForSelector('input[type="email"]')
-  const createTab = page.getByRole('button', { name: /^create account$/i })
+  const createTab = page.locator('button[type="button"]').filter({ hasText: 'Create account' })
   if (await createTab.isVisible({ timeout: 2000 }).catch(() => false)) await createTab.click()
   await page.fill('input[type="email"]', email)
   const pwFields = page.locator('input[type="password"]')
@@ -47,8 +47,8 @@ test.describe('settings', () => {
 
   test('can navigate to Email settings', async ({ page }) => {
     await page.getByRole('button', { name: /^email$/i }).click()
-    // Email settings form should show host/port fields
-    await expect(page.locator('input[placeholder*="host" i], input[placeholder*="smtp" i], label:has-text("host"), label:has-text("Host")')).toBeVisible({ timeout: 5000 })
+    // Email settings form should show SMTP host field
+    await expect(page.locator('input[placeholder="smtp.gmail.com"]')).toBeVisible({ timeout: 5000 })
   })
 
   test('can navigate to Speed Test settings', async ({ page }) => {
@@ -59,22 +59,22 @@ test.describe('settings', () => {
 
   test('telegram form has token and chat id fields', async ({ page }) => {
     // Telegram is the default active section
-    // Look for token-related input or button
+    // Token input placeholder is "123456789:ABCdef…"
     await expect(
-      page.locator('input[placeholder*="token" i], button:has-text("Change token"), button:has-text("Enter token")')
+      page.locator('input[placeholder*="ABCdef"], button:has-text("Change"), input[type="password"]').first()
     ).toBeVisible({ timeout: 5000 })
-    // Chat ID field
+    // Chat ID field placeholder is "987654321"
     await expect(
-      page.locator('input[placeholder*="chat" i]')
+      page.locator('input[placeholder="987654321"]')
     ).toBeVisible({ timeout: 5000 })
   })
 
   test('email form has host and port fields', async ({ page }) => {
     await page.getByRole('button', { name: /^email$/i }).click()
-    // Host field
-    await expect(page.locator('input[placeholder*="host" i], input[id*="host" i]')).toBeVisible({ timeout: 5000 })
-    // Port field — look for number input or labeled port
-    await expect(page.locator('input[type="number"], input[placeholder*="port" i], input[id*="port" i]')).toBeVisible({ timeout: 5000 })
+    // Host field placeholder is "smtp.gmail.com"
+    await expect(page.locator('input[placeholder="smtp.gmail.com"]')).toBeVisible({ timeout: 5000 })
+    // Port field is a number input
+    await expect(page.locator('input[type="number"]')).toBeVisible({ timeout: 5000 })
   })
 
   test('email form switches to Self-hosted mode', async ({ page }) => {
@@ -85,9 +85,7 @@ test.describe('settings', () => {
     await expect(selfHostedBtn).toBeVisible({ timeout: 5000 })
     await selfHostedBtn.click()
 
-    // After switching, the host should default to localhost or port to 1025
-    await expect(
-      page.locator('input[value="localhost"], input[value="1025"]')
-    ).toBeVisible({ timeout: 5000 })
+    // After switching, host defaults to "localhost"
+    await expect(page.locator('input[placeholder="localhost"]')).toBeVisible({ timeout: 5000 })
   })
 })

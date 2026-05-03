@@ -8,7 +8,7 @@ function uniqueEmail(prefix: string) {
 async function registerFresh(page: import('@playwright/test').Page, email: string) {
   await page.goto('/')
   await page.waitForSelector('input[type="email"]')
-  const createTab = page.getByRole('button', { name: /^create account$/i })
+  const createTab = page.locator('button[type="button"]').filter({ hasText: 'Create account' })
   if (await createTab.isVisible({ timeout: 2000 }).catch(() => false)) await createTab.click()
   await page.fill('input[type="email"]', email)
   const pwFields = page.locator('input[type="password"]')
@@ -46,14 +46,11 @@ test.describe('dashboard', () => {
   test('clicking Scan now triggers a scan', async ({ page }) => {
     const scanBtn = page.getByRole('button', { name: /scan now/i })
     await scanBtn.click()
-    // The button should either show "Scanning…" or remain in Scan Now state
-    // (scan completes quickly with fake scanner returning [])
-    // We just assert the button didn't disappear or throw an error
-    await expect(page.locator('header')).toBeVisible()
-    // Wait briefly to let the scan respond
-    await page.waitForTimeout(1000)
-    // Button should still be present (scan may have already completed)
-    await expect(page.getByRole('button', { name: /scan now|scanning/i })).toBeVisible()
+    // Scan completes quickly with fake scanner returning []
+    // Verify the user is still authenticated (sign-out button still present)
+    await expect(page.locator('button[title="Sign out"]')).toBeVisible({ timeout: 5000 })
+    // Scan button should reappear after scan completes
+    await expect(page.getByRole('button', { name: /scan now/i })).toBeVisible({ timeout: 5000 })
   })
 
   test('can switch to Topology view', async ({ page }) => {

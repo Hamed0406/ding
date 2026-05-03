@@ -68,7 +68,7 @@ test.describe('authentication', () => {
     // First registration
     await page.goto('/')
     await page.waitForSelector('input[type="email"]')
-    const regTab1 = page.getByRole('button', { name: /^create account$/i })
+    const regTab1 = page.locator('button[type="button"]').filter({ hasText: 'Create account' })
     if (await regTab1.isVisible({ timeout: 2000 }).catch(() => false)) await regTab1.click()
     await page.fill('input[type="email"]', email)
     const pwFields1 = page.locator('input[type="password"]')
@@ -104,7 +104,7 @@ test.describe('authentication', () => {
     // Register
     await page.goto('/')
     await page.waitForSelector('input[type="email"]')
-    const regTab = page.getByRole('button', { name: /^create account$/i })
+    const regTab = page.locator('button[type="button"]').filter({ hasText: 'Create account' })
     if (await regTab.isVisible({ timeout: 2000 }).catch(() => false)) await regTab.click()
     await page.fill('input[type="email"]', email)
     const pwFields = page.locator('input[type="password"]')
@@ -134,7 +134,7 @@ test.describe('authentication', () => {
     // Register and land on dashboard
     await page.goto('/')
     await page.waitForSelector('input[type="email"]')
-    const regTab = page.getByRole('button', { name: /^create account$/i })
+    const regTab = page.locator('button[type="button"]').filter({ hasText: 'Create account' })
     if (await regTab.isVisible({ timeout: 2000 }).catch(() => false)) await regTab.click()
     await page.fill('input[type="email"]', email)
     const pwFields = page.locator('input[type="password"]')
