@@ -28,6 +28,7 @@
 | Wake-on-LAN (magic packet via UDP broadcast) | `internal/api/handlers.go` |
 | Per-device notification opt-in (bell toggle) | `internal/storage/sqlite_store.go`, `internal/api/handlers.go` |
 | Telegram alerts — per-user token + chat ID | `internal/alert/alert.go`, `internal/storage/users.go` |
+| Email alerts — SMTP, auto-TLS, provider presets (Gmail, Outlook, Brevo, etc.) | `internal/email/email.go`, `internal/storage/users.go`, `ui/src/components/EmailSettings.tsx` |
 | Webhook alerts (Slack / Discord / ntfy.sh compatible) | `internal/alert/alert.go`, `internal/storage/users.go` |
 | Internet speed test (ping / download / upload via Cloudflare) | `internal/speedtest/speedtest.go`, `ui/src/components/SpeedTest.tsx` |
 | CSV / JSON device export (browser download) | `internal/api/handlers.go`, `ui/src/App.tsx` |
@@ -41,7 +42,7 @@
 | Google OAuth login | `internal/api/server.go` |
 | GitHub OAuth login | `internal/api/server.go` |
 | React PWA — installable on Android / desktop | `ui/` |
-| Full-page Settings UI (Telegram, Webhooks, Speed test) | `ui/src/components/SettingsPage.tsx` |
+| Full-page Settings UI (Telegram, Email, Webhooks, Speed test) | `ui/src/components/SettingsPage.tsx` |
 | Auto-detect network interface and subnet | `internal/iface/detect.go` |
 | Docker multi-arch images (linux/amd64 + linux/arm64) | `Dockerfile`, `.github/workflows/release.yml` |
 | Podman support (podman-compose + Quadlet) | `docker-compose.yml` |
@@ -132,6 +133,8 @@ Add a sender function to `internal/alert/alert.go` and call it from `alert.Send(
 - `KindMACChange` — always included (security event)
 - All other kinds — included only if the device has `Notify = true`
 
+Email alerts follow the same filter. See `internal/email/email.go` — `Send(cfg, changes)` accepts the same filtered slice. The per-user SMTP config is fetched from `store.GetAllEmailConfigs()` at alert time; any user with a saved host + To address receives the alert.
+
 ### Adding a new settings section
 Append to the `SECTIONS` array in `ui/src/components/SettingsPage.tsx` and add a matching panel component below. Follow the Telegram or Webhook section as a template (GET/PUT/test handler pattern).
 
@@ -152,6 +155,8 @@ This per-device flag only controls `BACK`, `GONE`, and `PORTS` events. `NEW` and
 
 ### Per-user config storage
 Telegram token/chat ID and webhook URL are columns on the `users` table. `GetAllTelegramConfigs()` and `GetAllWebhookURLs()` collect all configured users at alert time; fall back to `DING_TELEGRAM_TOKEN` env var if none are set.
+
+Email config lives in its own `user_email_config` table (one row per user, keyed by `user_id`). `GetAllEmailConfigs()` returns only rows where `host != ''` and `to_addr != ''` — incomplete configs are silently skipped at alert time. The password is stored in plain text in the database; protect the SQLite file accordingly (default `/data/ding.db`, owned by the container user).
 
 ### OAuth behind a reverse proxy
 The exchange token pattern (`/#exchange=TOKEN` URL fragment → `POST /api/auth/exchange`) works around Cloudflare Tunnel stripping `Set-Cookie` headers from redirect responses. Fragments are browser-only and never forwarded to proxies.

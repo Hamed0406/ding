@@ -31,6 +31,9 @@ type Config struct {
 
 // Send formats changes as a plain-text email and delivers it via SMTP.
 func Send(cfg Config, changes []diff.Change) error {
+	if len(changes) == 0 {
+		return nil
+	}
 	if cfg.Host == "" || cfg.To == "" {
 		return fmt.Errorf("email: host and To address are required")
 	}
@@ -64,9 +67,14 @@ func SendTest(cfg Config) error {
 // then authenticates and delivers the message.
 // When no username is set (e.g. Mailpit), the AUTH step is skipped entirely.
 func sendSTARTTLS(cfg Config, addr, msg string) error {
-	c, err := smtp.Dial(addr)
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("smtp dial %s: %w", addr, err)
+	}
+	c, err := smtp.NewClient(conn, cfg.Host)
+	if err != nil {
+		conn.Close()
+		return fmt.Errorf("smtp client %s: %w", addr, err)
 	}
 	defer c.Close()
 
@@ -90,7 +98,8 @@ func sendSTARTTLS(cfg Config, addr, msg string) error {
 // sendImplicitTLS connects directly over TLS (port 465).
 func sendImplicitTLS(cfg Config, addr, msg string) error {
 	tlsCfg := &tls.Config{ServerName: cfg.Host}
-	conn, err := tls.Dial("tcp", addr, tlsCfg)
+	dialer := &tls.Dialer{Config: tlsCfg, NetDialer: &net.Dialer{Timeout: 10 * time.Second}}
+	conn, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("smtp tls dial %s: %w", addr, err)
 	}
@@ -113,6 +122,9 @@ func sendImplicitTLS(cfg Config, addr, msg string) error {
 
 // deliver sends MAIL FROM / RCPT TO / DATA to an already-connected client.
 func deliver(c *smtp.Client, from, to, msg string) error {
+	if from == "" {
+		from = "ding@localhost"
+	}
 	if err := c.Mail(from); err != nil {
 		return fmt.Errorf("smtp MAIL FROM: %w", err)
 	}

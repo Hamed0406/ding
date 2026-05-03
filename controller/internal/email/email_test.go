@@ -160,7 +160,9 @@ func TestSend_NoHost(t *testing.T) {
 		Port: 587,
 		To:   "alert@example.com",
 	}
-	err := email.Send(cfg, nil)
+	// Must pass at least one change — empty slice is a no-op, not an error.
+	changes := []diff.Change{{Kind: diff.KindNew, IP: "192.168.1.1"}}
+	err := email.Send(cfg, changes)
 	if err == nil {
 		t.Error("expected error for empty host, got nil")
 	}

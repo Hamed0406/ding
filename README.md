@@ -444,6 +444,7 @@ The UI is a React PWA bundled into the Go binary. It works in any browser and is
 | **Passive detection** | Devices that send ARP traffic appear instantly without waiting for a scan |
 | **Authentication** | Email/password + Google and GitHub OAuth; session persists via HttpOnly cookie and bearer token |
 | **Telegram alerts** | Each user stores their own Telegram bot token and chat ID; alerts fire per-device when the bell is enabled |
+| **Email alerts** | SMTP-based alerts — supports Gmail, Outlook, Yahoo, iCloud, Fastmail, Brevo, or any self-hosted relay (Postfix, Mailpit); configured per-user in Settings → Email |
 | **Webhook alerts** | POST a JSON payload to any URL on change events — works natively with Slack, Discord, ntfy.sh, Home Assistant |
 | **First / last seen** | Every device card shows when it was first discovered and when it last responded |
 | **Speed test** | On-demand internet speed test (ping, download, upload) via Cloudflare; results saved and shown in history |
@@ -561,6 +562,26 @@ Per-device notifications are **disabled by default**. Enable them by clicking th
 3. Enter them in Settings → Notifications and click **Send test message** to confirm.
 4. Enable the bell icon on each device you want to track.
 
+### Email
+
+Settings → Email → configure your SMTP provider. Two modes:
+
+**External (Gmail, Outlook, Yahoo, iCloud, Fastmail, Brevo, or any SMTP)**
+
+Pick your provider from the preset dropdown — host and port are filled in automatically, and a hint shows how to get an App Password for that provider. Then enter your username, App Password, From address, and the address to send alerts to.
+
+**Self-hosted (Postfix, Mailpit, or any local relay)**
+
+Set host to `localhost` (or the relay hostname), port to `25` (Postfix) or `1025` (Mailpit), and leave username/password blank if no auth is required.
+
+> **Testing with Mailpit:** Mailpit is a local mail catcher — it accepts all SMTP but never delivers to real inboxes. Use it to verify Ding's email plumbing before switching to a real provider. Add it alongside Ding with:
+> ```bash
+> docker compose --profile mailpit up -d
+> ```
+> Then configure host=`localhost`, port=`1025`. Caught emails appear in Mailpit's web UI at **http://\<host\>:8025**.
+
+Click **Save**, then **Send test email** to confirm delivery before relying on it for alerts.
+
 ### Webhooks
 
 Settings → Webhooks → paste any HTTPS URL. Ding will POST JSON on every change event:
@@ -611,7 +632,7 @@ Go controller (ding)
   ├── diffs results         → NEW / BACK / GONE / PORTS changes
   ├── saves to /data/ding.db (SQLite) + updates first/last-seen timestamps
   ├── pushes scan events to all SSE clients
-  └── sends Telegram + webhook alerts (per-user config; NEW device always; bell-enabled devices for BACK/GONE/PORTS)
+  └── sends Telegram + email + webhook alerts (per-user config; NEW device always; bell-enabled devices for BACK/GONE/PORTS)
 
 Passive ARP listener (always running)
   └── watches ARP traffic → device_seen SSE events without waiting for scan
@@ -728,6 +749,7 @@ Results are stored in `./data/ding.db` (SQLite). Key tables:
 | `device_labels` | User-assigned custom names — survive scan cycles |
 | `device_notify` | Per-device alert opt-in flags |
 | `users` | Accounts — email, bcrypt hash, Telegram config, webhook URL |
+| `user_email_config` | Per-user SMTP settings (host, port, credentials, from/to addresses) |
 | `speedtest_results` | Historical internet speed test results |
 
 Schema migrations run automatically on startup — no manual steps needed when upgrading. No external database service is required; the SQLite engine is compiled into the binary.

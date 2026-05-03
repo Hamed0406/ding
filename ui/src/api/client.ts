@@ -252,7 +252,7 @@ export async function testEmailSettings(): Promise<void> {
   const res = await send('POST', '/api/settings/email/test')
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { error?: string }
-    throw new Error(body.error ?? `test failed: HTTP ${res.status}`)
+    throw new Error(body.error ?? `Test failed (HTTP ${res.status}) — check that your SMTP host is reachable.`)
   }
 }
 

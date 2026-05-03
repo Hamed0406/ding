@@ -43,6 +43,7 @@ export function EmailSettings() {
 
   const [passwordSet, setPasswordSet]         = useState(false)
   const [editingPassword, setEditingPassword] = useState(false)
+  const [savedToServer, setSavedToServer]     = useState(false)
 
   const [saving, setSaving]   = useState(false)
   const [testing, setTesting] = useState(false)
@@ -62,6 +63,7 @@ export function EmailSettings() {
           setFrom(cfg.from)
           setTo(cfg.to)
           setPasswordSet(cfg.password_set)
+          setSavedToServer(true)
         }
       })
       .catch(() => {})
@@ -97,6 +99,7 @@ export function EmailSettings() {
       const passwordToSend = (passwordSet && !editingPassword) ? '' : password
       await saveEmailSettings({ host, port, username, password: passwordToSend, from, to })
       setStatus({ ok: true, msg: 'Settings saved.' })
+      setSavedToServer(true)
       if (password) { setPasswordSet(true); setEditingPassword(false); setPassword('') }
     } catch (err) {
       setStatus({ ok: false, msg: err instanceof Error ? err.message : 'Save failed.' })
@@ -126,6 +129,7 @@ export function EmailSettings() {
       await saveEmailSettings({ host: '', port: 587, username: '', password: '', from: '', to: '' })
       setHost(''); setPort(587); setUsername(''); setPassword('')
       setFrom(''); setTo(''); setPasswordSet(false); setEditingPassword(false)
+      setSavedToServer(false)
       setStatus({ ok: true, msg: 'Email config cleared.' })
     } catch {
       setStatus({ ok: false, msg: 'Failed to clear.' })
@@ -135,7 +139,7 @@ export function EmailSettings() {
   }
 
   const presetHint = mode === 'external' ? PRESETS[preset]?.hint : ''
-  const isConfigured = host !== '' && to !== ''
+  const canTest = savedToServer && host !== '' && to !== ''
 
   return (
     <div className="max-w-lg space-y-6">
@@ -286,13 +290,13 @@ export function EmailSettings() {
           </button>
           <button
             onClick={handleTest}
-            disabled={testing || !isConfigured}
-            title={!isConfigured ? 'Fill in host and To address first' : 'Send a test email'}
+            disabled={testing || !canTest}
+            title={!savedToServer ? 'Click Save first' : (!canTest ? 'Fill in host and To address first' : 'Send a test email')}
             className="px-5 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium text-slate-200 transition-colors"
           >
             {testing ? 'Sending…' : 'Send test email'}
           </button>
-          {isConfigured && (
+          {savedToServer && (
             <button
               onClick={handleClear}
               disabled={saving}

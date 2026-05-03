@@ -200,16 +200,18 @@ func main() {
 				log.Printf("alert webhook: %v", err)
 			}
 		}
-		for _, ec := range store.GetAllEmailConfigs() {
-			if err := email.Send(email.Config{
-				Host:     ec.Host,
-				Port:     ec.Port,
-				Username: ec.Username,
-				Password: ec.Password,
-				From:     ec.From,
-				To:       ec.To,
-			}, alertChanges); err != nil {
-				log.Printf("alert email: %v", err)
+		if len(alertChanges) > 0 {
+			for _, ec := range store.GetAllEmailConfigs() {
+				if err := email.Send(email.Config{
+					Host:     ec.Host,
+					Port:     ec.Port,
+					Username: ec.Username,
+					Password: ec.Password,
+					From:     ec.From,
+					To:       ec.To,
+				}, alertChanges); err != nil {
+					log.Printf("alert email: %v", err)
+				}
 			}
 		}
 

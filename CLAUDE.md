@@ -40,6 +40,7 @@ controller/               Go module (github.com/ding/ding)
     diff/diff.go          Compares []Result slices → []Change (NEW / GONE / PORTS / BACK)
     speedtest/speedtest.go  Internet speed test — ping/download/upload via speed.cloudflare.com
     alert/alert.go        Telegram + webhook alerts; Send() fans out to all configured channels
+    email/email.go        SMTP email alerts; auto-TLS (port 465=implicit TLS, else STARTTLS); no-auth for local relays
     iface/detect.go       Auto-detects LAN interface and subnet
     api/
       server.go           HTTP server, go:embed, SPA fallback, TriggerScan()
@@ -163,6 +164,7 @@ main.go
     → diff.Compare()            # produce []Change (NEW / GONE / PORTS / BACK)
     → store.Save()              # write to SQLite; upserts device_seen_at (first/last seen)
     → alert.Send()              # Telegram + webhooks; NEW+MAC_CHANGE always; BACK/GONE/PORTS only if bell enabled
+    → email.Send()              # SMTP email; same change filter; all users with host+to configured
     → broker.Publish()          # push SSE scan_result with store.AllDevices() registry
 ```
 
@@ -184,6 +186,9 @@ main.go
 | GET | `/api/settings/telegram` | Get current user's Telegram config |
 | PUT | `/api/settings/telegram` | Save current user's Telegram token + chat ID |
 | POST | `/api/settings/telegram/test` | Send a test Telegram message |
+| GET | `/api/settings/email` | Get current user's SMTP email config (password masked) |
+| PUT | `/api/settings/email` | Save current user's SMTP config (empty password = keep existing) |
+| POST | `/api/settings/email/test` | Send a test email via saved SMTP config |
 | GET | `/api/settings/webhook` | Get current user's webhook URL |
 | PUT | `/api/settings/webhook` | Save current user's webhook URL |
 | POST | `/api/settings/webhook/test` | Send a test webhook payload |
@@ -207,5 +212,5 @@ main.go
 - **New settings section** → add a panel to `SettingsPage.tsx`, add GET/PUT/test handlers + routes following the Telegram/webhook pattern.
 - **New UI component** → add under `ui/src/components/`, wire into `App.tsx`.
 - **Scheduling / daemon mode** → already implemented; tune `DING_SCAN_INTERVAL`.
-- **New storage backend** (e.g. Postgres) → implement `storage.Store` (15 methods: `Save`, `Latest`, `LatestRecord`, `History`, `AllKnownIPs`, `AllDevices`, `DeviceHistory`, `SetLabel`, `DeleteLabel`, `GetLabels`, `SetNotify`, `SaveSpeedtest`, `SpeedtestHistory`) and `storage.UserStore` (9 methods: `CreateUser`, `FindUserByEmail`, `FindUserByProvider`, `LinkProvider`, `UserCount`, `SaveTelegramConfig`, `GetTelegramConfig`, `GetAllTelegramConfigs`, `SaveWebhookURL`, `GetWebhookURL`, `GetAllWebhookURLs`), then swap `storage.NewSQLite` for your constructor in `main.go`.
+- **New storage backend** (e.g. Postgres) → implement `storage.Store` (15 methods: `Save`, `Latest`, `LatestRecord`, `History`, `AllKnownIPs`, `AllDevices`, `DeviceHistory`, `SetLabel`, `DeleteLabel`, `GetLabels`, `SetNotify`, `SaveSpeedtest`, `SpeedtestHistory`) and `storage.UserStore` (12 methods: `CreateUser`, `FindUserByEmail`, `FindUserByProvider`, `LinkProvider`, `UserCount`, `SaveTelegramConfig`, `GetTelegramConfig`, `GetAllTelegramConfigs`, `SaveWebhookURL`, `GetWebhookURL`, `GetAllWebhookURLs`, `SaveEmailConfig`, `GetEmailConfig`, `GetAllEmailConfigs`), then swap `storage.NewSQLite` for your constructor in `main.go`.
 - **SQLite schema migrations** → append `_, _ = db.Exec(...)` calls to `sqliteMigrate()` in `sqlite_store.go`; existing databases are migrated automatically on startup. Never use `CREATE TABLE` without `IF NOT EXISTS` and never drop columns.

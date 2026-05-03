@@ -39,6 +39,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"sort"
@@ -174,7 +175,16 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if tok := s.sessionToken(r); tok != "" {
 		s.sessions.delete(tok)
 	}
-	http.SetCookie(w, &http.Cookie{Name: "ding_session", Value: "", Path: "/", MaxAge: -1})
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	http.SetCookie(w, &http.Cookie{
+		Name:     "ding_session",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -714,6 +724,7 @@ func (s *Server) handleTestEmail(w http.ResponseWriter, r *http.Request) {
 		From:     cfg.From,
 		To:       cfg.To,
 	}); err != nil {
+		log.Printf("email test failed (%s:%d): %v", cfg.Host, cfg.Port, err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}

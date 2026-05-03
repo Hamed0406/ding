@@ -15,3 +15,16 @@ services:
     restart: unless-stopped
     # Note: port mapping is ignored with network_mode: host.
     # Access the UI at http://<host-ip>:8081
+
+  # Optional local mail catcher — start with: docker compose --profile mailpit up
+  # SMTP: localhost:1025   Web UI: http://<host-ip>:8025
+  # In Ding email settings: host=localhost, port=1025, no username/password needed.
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: [mailpit]
+    # Must use host networking so ding (also on host network) can reach localhost:1025
+    network_mode: host
+    environment:
+      MP_SMTP_BIND_ADDR: "0.0.0.0:1025"
+      MP_UI_BIND_ADDR: "0.0.0.0:8025"
+    restart: unless-stopped

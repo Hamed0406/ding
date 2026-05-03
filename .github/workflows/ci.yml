@@ -36,6 +36,8 @@ jobs:
   rust:
     name: Rust scanner
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: scanner
@@ -60,6 +62,8 @@ jobs:
   go:
     name: Go controller
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: controller
@@ -86,6 +90,8 @@ jobs:
   ui:
     name: React UI
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: ui
@@ -107,6 +113,8 @@ jobs:
     name: Docker image
     runs-on: ubuntu-latest
     needs: [rust, go, ui]
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -144,6 +152,8 @@ jobs:
   test-ui:
     name: UI component tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: ui
@@ -159,6 +169,8 @@ jobs:
     name: E2E tests
     runs-on: ubuntu-latest
     needs: [go, ui]
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
