@@ -8,13 +8,15 @@ function uniqueEmail(prefix: string) {
 async function registerFresh(page: import('@playwright/test').Page, email: string) {
   await page.goto('/')
   await page.waitForSelector('input[type="email"]')
+  const createTab = page.getByRole('button', { name: /^create account$/i })
+  if (await createTab.isVisible({ timeout: 2000 }).catch(() => false)) await createTab.click()
   await page.fill('input[type="email"]', email)
   const pwFields = page.locator('input[type="password"]')
   await pwFields.nth(0).fill('password123')
   const count = await pwFields.count()
   if (count > 1) await pwFields.nth(1).fill('password123')
-  await page.getByRole('button', { name: /create account|sign in/i }).first().click()
-  await page.waitForURL('/')
+  await page.locator('button[type="submit"]').click()
+  await page.locator('button[title="Sign out"]').waitFor({ timeout: 10000 })
 }
 
 test.describe('dashboard', () => {

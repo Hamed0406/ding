@@ -37,7 +37,7 @@ test.describe('authentication', () => {
     await page.goto('/')
     // Login form should be visible
     await expect(page.locator('input[type="email"]')).toBeVisible()
-    await expect(page.locator('input[type="password"]')).toBeVisible()
+    await expect(page.locator('input[type="password"]').first()).toBeVisible()
   })
 
   test('can register a new account', async ({ page }) => {
@@ -68,23 +68,23 @@ test.describe('authentication', () => {
     // First registration
     await page.goto('/')
     await page.waitForSelector('input[type="email"]')
+    const regTab1 = page.getByRole('button', { name: /^create account$/i })
+    if (await regTab1.isVisible({ timeout: 2000 }).catch(() => false)) await regTab1.click()
     await page.fill('input[type="email"]', email)
     const pwFields1 = page.locator('input[type="password"]')
     await pwFields1.nth(0).fill('password123')
     const c1 = await pwFields1.count()
     if (c1 > 1) await pwFields1.nth(1).fill('password123')
-    await page.getByRole('button', { name: /create account|sign in/i }).first().click()
-    await page.waitForURL('/')
+    await page.locator('button[type="submit"]').click()
+    await page.locator('button[title="Sign out"]').waitFor({ timeout: 10000 })
 
     // Log out
     await page.getByRole('button', { name: /sign out/i }).click()
     await page.waitForSelector('input[type="email"]')
 
     // Switch to register tab (users exist now)
-    const createTab = page.getByRole('button', { name: /create account/i })
-    if (await createTab.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await createTab.click()
-    }
+    const createTab = page.getByRole('button', { name: /^create account$/i })
+    if (await createTab.isVisible({ timeout: 2000 }).catch(() => false)) await createTab.click()
 
     // Try to register with same email
     await page.fill('input[type="email"]', email)
@@ -92,7 +92,7 @@ test.describe('authentication', () => {
     await pwFields2.nth(0).fill('password123')
     const c2 = await pwFields2.count()
     if (c2 > 1) await pwFields2.nth(1).fill('password123')
-    await page.getByRole('button', { name: /create account/i }).first().click()
+    await page.locator('button[type="submit"]').click()
 
     // Expect an error message
     await expect(page.locator('p.text-red-400, [class*="text-red"]')).toBeVisible({ timeout: 5000 })
@@ -104,13 +104,15 @@ test.describe('authentication', () => {
     // Register
     await page.goto('/')
     await page.waitForSelector('input[type="email"]')
+    const regTab = page.getByRole('button', { name: /^create account$/i })
+    if (await regTab.isVisible({ timeout: 2000 }).catch(() => false)) await regTab.click()
     await page.fill('input[type="email"]', email)
     const pwFields = page.locator('input[type="password"]')
     await pwFields.nth(0).fill('password123')
     const count = await pwFields.count()
     if (count > 1) await pwFields.nth(1).fill('password123')
-    await page.getByRole('button', { name: /create account|sign in/i }).first().click()
-    await page.waitForURL('/')
+    await page.locator('button[type="submit"]').click()
+    await page.locator('button[title="Sign out"]').waitFor({ timeout: 10000 })
 
     // Log out
     await page.getByRole('button', { name: /sign out/i }).click()
@@ -119,11 +121,11 @@ test.describe('authentication', () => {
     // Log in again
     await page.fill('input[type="email"]', email)
     await page.fill('input[type="password"]', 'password123')
-    await page.getByRole('button', { name: /sign in/i }).click()
-    await page.waitForURL('/')
+    await page.locator('button[type="submit"]').click()
+    await page.locator('button[title="Sign out"]').waitFor({ timeout: 10000 })
 
     // Dashboard visible
-    await expect(page.getByRole('heading', { name: /ding/i })).toBeVisible()
+    await expect(page.locator('button[title="Settings"]')).toBeVisible()
   })
 
   test('can log out', async ({ page }) => {
@@ -132,13 +134,15 @@ test.describe('authentication', () => {
     // Register and land on dashboard
     await page.goto('/')
     await page.waitForSelector('input[type="email"]')
+    const regTab = page.getByRole('button', { name: /^create account$/i })
+    if (await regTab.isVisible({ timeout: 2000 }).catch(() => false)) await regTab.click()
     await page.fill('input[type="email"]', email)
     const pwFields = page.locator('input[type="password"]')
     await pwFields.nth(0).fill('password123')
     const count = await pwFields.count()
     if (count > 1) await pwFields.nth(1).fill('password123')
-    await page.getByRole('button', { name: /create account|sign in/i }).first().click()
-    await page.waitForURL('/')
+    await page.locator('button[type="submit"]').click()
+    await page.locator('button[title="Sign out"]').waitFor({ timeout: 10000 })
 
     // Sign out
     await page.getByRole('button', { name: /sign out/i }).click()
