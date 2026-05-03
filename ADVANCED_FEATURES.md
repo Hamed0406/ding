@@ -32,6 +32,7 @@
 | Webhook alerts (Slack / Discord / ntfy.sh compatible) | `internal/alert/alert.go`, `internal/storage/users.go` |
 | Internet speed test (ping / download / upload via Cloudflare) | `internal/speedtest/speedtest.go`, `ui/src/components/SpeedTest.tsx` |
 | CSV / JSON device export (browser download) | `internal/api/handlers.go`, `ui/src/App.tsx` |
+| ARP spoofing detection — alerts when an IP is claimed by a new MAC | `internal/storage/sqlite_store.go`, `internal/api/handlers.go` (`/api/arpwatch`) |
 | Network topology map (SVG star layout) | `internal/topology/topology.go`, `ui/src/components/TopologyMap.tsx` |
 | Per-device history view (dot timeline, scan log) | `ui/src/components/DeviceHistory.tsx` |
 | Events view — filterable change log (NEW/BACK/GONE/PORTS) | `ui/src/components/ChangeLog.tsx` |
@@ -92,13 +93,11 @@
 
 - **IPv6 support** — ICMPv6 neighbor discovery in Rust; extend `types.rs` and `ScanResult` for IPv6 addresses; dual-stack enrichment pipeline.
 
-- **ARP spoofing detection** — compare MAC-to-IP mappings across consecutive scans; alert when the same IP is claimed by a different MAC (classic ARP poisoning signal).
-
 - **Bandwidth monitoring** — per-device traffic stats; requires iptables conntrack, eBPF, or a SNMP ifInOctets / ifOutOctets poll (OIDs 1.3.6.1.2.1.2.2.1.10 / .16). The SNMP stack is already in place.
 
 - **Configurable scan profiles** — named profiles: "quick" (ARP only, no port scan), "standard" (default), "deep" (full 1–65535 port range), "stealth" (slow TCP with randomised timing). Stored in SQLite; selectable from the UI before triggering a scan.
 
-- **Postgres / MySQL backend** — implement `storage.Store` (15 methods) and `storage.UserStore` (11 methods) with a different driver; swap the constructor in `main.go`. No other changes needed.
+- **Postgres / MySQL backend** — implement `storage.Store` (17 methods) and `storage.UserStore` (14 methods) with a different driver; swap the constructor in `main.go`. No other changes needed.
 
 - **macOS / Windows installer** — bundle `scanner` + `ding` into a `.dmg` (macOS) or `.msi` / WiX installer (Windows) with Npcap bundled, so non-technical users don't need a terminal.
 
@@ -139,9 +138,9 @@ Email alerts follow the same filter. See `internal/email/email.go` — `Send(cfg
 Append to the `SECTIONS` array in `ui/src/components/SettingsPage.tsx` and add a matching panel component below. Follow the Telegram or Webhook section as a template (GET/PUT/test handler pattern).
 
 ### Storage interface
-`storage.Store` has 15 methods: `Save`, `Latest`, `LatestRecord`, `History`, `AllKnownIPs`, `AllDevices`, `DeviceHistory`, `SetLabel`, `DeleteLabel`, `GetLabels`, `SetNotify`, `SaveSpeedtest`, `SpeedtestHistory`, `SaveChanges`, `Changes`.
+`storage.Store` has 17 methods: `Save`, `Latest`, `LatestRecord`, `History`, `AllKnownIPs`, `AllDevices`, `DeviceHistory`, `SetLabel`, `DeleteLabel`, `GetLabels`, `SetNotify`, `SaveSpeedtest`, `SpeedtestHistory`, `SaveChanges`, `Changes`, `UpdateMACHistory`, `ARPConflicts`.
 
-`storage.UserStore` has 11 methods: `CreateUser`, `FindUserByEmail`, `FindUserByProvider`, `LinkProvider`, `UserCount`, `SaveTelegramConfig`, `GetTelegramConfig`, `GetAllTelegramConfigs`, `SaveWebhookURL`, `GetWebhookURL`, `GetAllWebhookURLs`.
+`storage.UserStore` has 14 methods: `CreateUser`, `FindUserByEmail`, `FindUserByProvider`, `LinkProvider`, `UserCount`, `SaveTelegramConfig`, `GetTelegramConfig`, `GetAllTelegramConfigs`, `SaveWebhookURL`, `GetWebhookURL`, `GetAllWebhookURLs`, `SaveEmailConfig`, `GetEmailConfig`, `GetAllEmailConfigs`.
 
 Both are implemented by `*SQLiteStore`. Swap backends by changing one constructor call in `main.go`.
 
@@ -156,7 +155,9 @@ This per-device flag only controls `BACK`, `GONE`, and `PORTS` events. `NEW` and
 ### Per-user config storage
 Telegram token/chat ID and webhook URL are columns on the `users` table. `GetAllTelegramConfigs()` and `GetAllWebhookURLs()` collect all configured users at alert time; fall back to `DING_TELEGRAM_TOKEN` env var if none are set.
 
-Email config lives in its own `user_email_config` table (one row per user, keyed by `user_id`). `GetAllEmailConfigs()` returns only rows where `host != ''` and `to_addr != ''` — incomplete configs are silently skipped at alert time. The password is stored in plain text in the database; protect the SQLite file accordingly (default `/data/ding.db`, owned by the container user).
+Email config lives in its own `user_email_config` table (one row per user, keyed by `user_id`). `GetAllEmailConfigs()` returns only rows where `host != ''` and `to_addr != ''` — incomplete configs are silently skipped at alert time.
+
+**SMTP password encryption** — when `DING_SECRET_KEY` is set, `SaveEmailConfig` encrypts the password with AES-256-GCM (`internal/storage/crypto.go`) before writing to `user_email_config.password`. The stored value is prefixed `enc:v1:` to distinguish it from legacy plaintext. `GetEmailConfig` and `GetAllEmailConfigs` decrypt transparently on read. Values without the prefix are returned as-is (backwards compatible — existing passwords keep working until re-saved). The key is derived via SHA-256 so any string length works; a 32-byte random base64 value is recommended (`openssl rand -base64 32`). If the key is missing at decrypt time, an error is returned and email alerts stop — keep the key in a safe place (e.g. a Docker secret or password manager).
 
 ### OAuth behind a reverse proxy
 The exchange token pattern (`/#exchange=TOKEN` URL fragment → `POST /api/auth/exchange`) works around Cloudflare Tunnel stripping `Set-Cookie` headers from redirect responses. Fragments are browser-only and never forwarded to proxies.

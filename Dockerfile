@@ -28,7 +28,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /ding ./cmd/ding
 
 # Stage 4 — Minimal runtime image
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=scanner-build  /build/scanner/target/release/scanner  /usr/local/bin/scanner
@@ -38,5 +38,7 @@ RUN mkdir -p /data
 VOLUME ["/data"]
 
 # Requires --network host + CAP_NET_RAW + CAP_NET_ADMIN (see docker-compose.yml)
-EXPOSE 8080
+EXPOSE 8081
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl -sf http://localhost:8081/api/auth/providers || exit 1
 ENTRYPOINT ["/usr/local/bin/ding"]

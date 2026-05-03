@@ -42,6 +42,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -63,6 +64,17 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// validPathIP returns the {ip} path value after confirming it parses as an IP address.
+// Writes 400 and returns ("", false) if the value is not a valid IP.
+func validPathIP(w http.ResponseWriter, r *http.Request) (string, bool) {
+	ip := r.PathValue("ip")
+	if net.ParseIP(ip) == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid IP address"})
+		return "", false
+	}
+	return ip, true
 }
 
 // handleAuthProviders responds to GET /api/auth/providers
@@ -373,7 +385,10 @@ func (s *Server) handleScan(w http.ResponseWriter, _ *http.Request) {
 // Body: {"name": "Living Room Router"}
 // Sets a persistent human-readable name for the device at {ip}.
 func (s *Server) handleSetLabel(w http.ResponseWriter, r *http.Request) {
-	ip := r.PathValue("ip")
+	ip, ok := validPathIP(w, r)
+	if !ok {
+		return
+	}
 	var body struct {
 		Name string `json:"name"`
 	}
@@ -384,6 +399,10 @@ func (s *Server) handleSetLabel(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name must not be empty"})
+		return
+	}
+	if len(name) > 255 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name must be 255 characters or fewer"})
 		return
 	}
 	if err := s.store.SetLabel(ip, name); err != nil {
@@ -397,7 +416,10 @@ func (s *Server) handleSetLabel(w http.ResponseWriter, r *http.Request) {
 // Body: {"enabled": true|false}
 // Enables or disables change alerts for the device at {ip}.
 func (s *Server) handleSetNotify(w http.ResponseWriter, r *http.Request) {
-	ip := r.PathValue("ip")
+	ip, ok := validPathIP(w, r)
+	if !ok {
+		return
+	}
 	var body struct {
 		Enabled bool `json:"enabled"`
 	}
@@ -415,7 +437,10 @@ func (s *Server) handleSetNotify(w http.ResponseWriter, r *http.Request) {
 // handleDelLabel responds to DELETE /api/devices/{ip}/label
 // Removes any custom name previously set for the device at {ip}.
 func (s *Server) handleDelLabel(w http.ResponseWriter, r *http.Request) {
-	ip := r.PathValue("ip")
+	ip, ok := validPathIP(w, r)
+	if !ok {
+		return
+	}
 	if err := s.store.DeleteLabel(ip); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -426,7 +451,10 @@ func (s *Server) handleDelLabel(w http.ResponseWriter, r *http.Request) {
 // handleDeviceHistory responds to GET /api/devices/{ip}/history
 // Returns the last 100 scan entries for the given IP, oldest first.
 func (s *Server) handleDeviceHistory(w http.ResponseWriter, r *http.Request) {
-	ip := r.PathValue("ip")
+	ip, ok := validPathIP(w, r)
+	if !ok {
+		return
+	}
 	entries := s.store.DeviceHistory(ip, 100)
 	if entries == nil {
 		entries = []storage.DeviceHistoryEntry{}
@@ -438,7 +466,10 @@ func (s *Server) handleDeviceHistory(w http.ResponseWriter, r *http.Request) {
 // Runs an immediate parallel TCP port scan against the single device and
 // returns the open ports as JSON — no Rust subprocess, no SSE, result is instant.
 func (s *Server) handleDeviceScan(w http.ResponseWriter, r *http.Request) {
-	ip := r.PathValue("ip")
+	ip, ok := validPathIP(w, r)
+	if !ok {
+		return
+	}
 	ports := parsePorts(s.cfg.Ports)
 	timeout := time.Duration(s.cfg.TimeoutMs) * time.Millisecond
 	if timeout <= 0 {
@@ -497,7 +528,10 @@ func parsePorts(s string) []uint16 {
 // handleWake responds to POST /api/devices/{ip}/wake
 // Looks up the device's MAC address and sends a Wake-on-LAN magic packet via UDP broadcast.
 func (s *Server) handleWake(w http.ResponseWriter, r *http.Request) {
-	ip := r.PathValue("ip")
+	ip, ok := validPathIP(w, r)
+	if !ok {
+		return
+	}
 
 	var mac string
 	for _, d := range s.store.AllDevices() {
@@ -631,6 +665,13 @@ func (s *Server) handleSaveWebhook(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
+	}
+	if body.URL != "" {
+		parsed, err := url.Parse(body.URL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "webhook URL must use http or https"})
+			return
+		}
 	}
 	if err := s.users.SaveWebhookURL(s.currentUserID(r), body.URL); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save"})

@@ -188,8 +188,13 @@ func (s *SQLiteStore) GetAllWebhookURLs() []string {
 
 // SaveEmailConfig upserts the SMTP config for the given user.
 // Passing an empty Host clears the config (disables email alerts for that user).
+// The password is encrypted with AES-256-GCM if DING_SECRET_KEY is configured.
 func (s *SQLiteStore) SaveEmailConfig(userID int64, cfg EmailConfig) error {
-	_, err := s.db.Exec(`
+	enc, err := encryptPassword(s.secretKey, cfg.Password)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
 		INSERT INTO user_email_config (user_id, host, port, username, password, from_addr, to_addr)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id) DO UPDATE SET
@@ -199,7 +204,7 @@ func (s *SQLiteStore) SaveEmailConfig(userID int64, cfg EmailConfig) error {
 			password  = excluded.password,
 			from_addr = excluded.from_addr,
 			to_addr   = excluded.to_addr
-	`, userID, cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.From, cfg.To)
+	`, userID, cfg.Host, cfg.Port, cfg.Username, enc, cfg.From, cfg.To)
 	return err
 }
 
@@ -207,13 +212,18 @@ func (s *SQLiteStore) SaveEmailConfig(userID int64, cfg EmailConfig) error {
 // Returns a zero-value config (Host="") if none is stored.
 func (s *SQLiteStore) GetEmailConfig(userID int64) (EmailConfig, error) {
 	var cfg EmailConfig
+	var storedPw string
 	err := s.db.QueryRow(`
 		SELECT host, port, username, password, from_addr, to_addr
 		FROM user_email_config WHERE user_id = ?
-	`, userID).Scan(&cfg.Host, &cfg.Port, &cfg.Username, &cfg.Password, &cfg.From, &cfg.To)
+	`, userID).Scan(&cfg.Host, &cfg.Port, &cfg.Username, &storedPw, &cfg.From, &cfg.To)
 	if err == sql.ErrNoRows {
 		return EmailConfig{Port: 587}, nil
 	}
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Password, err = decryptPassword(s.secretKey, storedPw)
 	return cfg, err
 }
 
@@ -231,9 +241,12 @@ func (s *SQLiteStore) GetAllEmailConfigs() []EmailConfig {
 	var cfgs []EmailConfig
 	for rows.Next() {
 		var cfg EmailConfig
-		if err := rows.Scan(&cfg.Host, &cfg.Port, &cfg.Username, &cfg.Password, &cfg.From, &cfg.To); err == nil {
-			cfgs = append(cfgs, cfg)
+		var storedPw string
+		if err := rows.Scan(&cfg.Host, &cfg.Port, &cfg.Username, &storedPw, &cfg.From, &cfg.To); err != nil {
+			continue
 		}
+		cfg.Password, _ = decryptPassword(s.secretKey, storedPw)
+		cfgs = append(cfgs, cfg)
 	}
 	return cfgs
 }

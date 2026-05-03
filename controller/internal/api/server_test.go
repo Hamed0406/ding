@@ -704,6 +704,132 @@ func TestSpeedtestHistory_AfterSave(t *testing.T) {
 	}
 }
 
+// ── Security headers ──────────────────────────────────────────────────────────
+
+func TestSecurityHeaders(t *testing.T) {
+	e := newEnv(t)
+	resp, err := http.Get(e.ts.URL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	resp.Body.Close()
+
+	cases := []struct{ header, want string }{
+		{"X-Content-Type-Options", "nosniff"},
+		{"X-Frame-Options", "DENY"},
+		{"Referrer-Policy", "same-origin"},
+	}
+	for _, c := range cases {
+		if got := resp.Header.Get(c.header); got != c.want {
+			t.Errorf("%s: want %q, got %q", c.header, c.want, got)
+		}
+	}
+}
+
+// ── IP validation ─────────────────────────────────────────────────────────────
+
+func TestInvalidIP_DeviceScan(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	// Only values that actually route to the handler — path traversal strings
+	// are cleaned by the HTTP mux before they reach any handler.
+	for _, bad := range []string{"not-an-ip", "999.999.999.999", "hostname"} {
+		path := "/api/devices/" + bad + "/scan"
+		resp := e.authPost(t, tok, path, "")
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("POST %s with bad IP %q: want 400, got %d", path, bad, resp.StatusCode)
+		}
+	}
+}
+
+func TestInvalidIP_Label(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authPut(t, tok, "/api/devices/not-an-ip/label", `{"name":"test"}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400 for invalid IP in label path, got %d", resp.StatusCode)
+	}
+}
+
+func TestInvalidIP_History(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authGet(t, tok, "/api/devices/not-an-ip/history")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400 for invalid IP in history path, got %d", resp.StatusCode)
+	}
+}
+
+// ── Webhook URL validation ────────────────────────────────────────────────────
+
+func TestSaveWebhook_ValidURL(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	for _, good := range []string{"http://example.com/hook", "https://hooks.example.com/path"} {
+		body := fmt.Sprintf(`{"url":%q}`, good)
+		resp := e.authPut(t, tok, "/api/settings/webhook", body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("PUT webhook with valid URL %q: want 200, got %d", good, resp.StatusCode)
+		}
+	}
+}
+
+func TestSaveWebhook_InvalidScheme(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	// Validation blocks any scheme that isn't http or https.
+	// http://169.254.169.254 is a valid http URL and is not blocked — LAN webhook
+	// targets are legitimate for home users (e.g. Home Assistant).
+	for _, bad := range []string{
+		"file:///etc/passwd",
+		"ftp://example.com",
+		"javascript:alert(1)",
+	} {
+		body := fmt.Sprintf(`{"url":%q}`, bad)
+		resp := e.authPut(t, tok, "/api/settings/webhook", body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("PUT webhook with bad URL %q: want 400, got %d", bad, resp.StatusCode)
+		}
+	}
+}
+
+func TestSaveWebhook_ClearURL(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	// Empty string is allowed (means "clear the webhook")
+	resp := e.authPut(t, tok, "/api/settings/webhook", `{"url":""}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT webhook with empty URL: want 200, got %d", resp.StatusCode)
+	}
+}
+
+// ── Body size limit ───────────────────────────────────────────────────────────
+
+func TestBodySizeLimit(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+
+	// Build a payload just over the 1 MB limit.
+	large := bytes.Repeat([]byte("x"), (1<<20)+1)
+	req, _ := http.NewRequest("PUT", e.ts.URL+"/api/settings/webhook", bytes.NewReader(large))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized body: want 400 or 413, got %d", resp.StatusCode)
+	}
+}
+
 // compile-time assertion: these imports are used
 var (
 	_ = bytes.NewReader

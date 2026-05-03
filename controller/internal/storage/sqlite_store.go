@@ -33,11 +33,14 @@ import (
 // SQLiteStore implements Store using a local SQLite database.
 // Schema is normalized: one row per device per scan, enabling future analytics.
 type SQLiteStore struct {
-	db *sql.DB
+	db        *sql.DB
+	secretKey string // AES-256-GCM key for encrypting SMTP passwords; empty = no encryption
 }
 
 // NewSQLite opens (or creates) a SQLite database at path and runs migrations.
-func NewSQLite(path string) (*SQLiteStore, error) {
+// secretKey is used to encrypt/decrypt SMTP passwords (AES-256-GCM).
+// Pass an empty string to skip encryption (insecure — plaintext in DB).
+func NewSQLite(path string, secretKey ...string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
@@ -56,7 +59,11 @@ func NewSQLite(path string) (*SQLiteStore, error) {
 	if err := sqliteMigrate(db); err != nil {
 		return nil, err
 	}
-	return &SQLiteStore{db: db}, nil
+	s := &SQLiteStore{db: db}
+	if len(secretKey) > 0 {
+		s.secretKey = secretKey[0]
+	}
+	return s, nil
 }
 
 func sqliteMigrate(db *sql.DB) error {
@@ -173,6 +180,20 @@ func sqliteMigrate(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_mac_history_ip ON mac_history(ip);
 	`)
 	return nil
+}
+
+// PruneOldData deletes scan records older than scanAge and change-log entries
+// older than changeAge. The devices table cascades on scan deletion automatically.
+// Safe to call on a live database — runs in a single transaction.
+func (s *SQLiteStore) PruneOldData(scanAge, changeAge time.Duration) error {
+	scanCutoff := time.Now().Add(-scanAge).UTC().Format(time.RFC3339)
+	changeCutoff := time.Now().Add(-changeAge).UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`DELETE FROM scans      WHERE scanned_at  < ?`, scanCutoff)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`DELETE FROM change_log WHERE occurred_at < ?`, changeCutoff)
+	return err
 }
 
 func (s *SQLiteStore) Save(results []scanner.Result) error {

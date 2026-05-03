@@ -42,10 +42,20 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
+	// Fail fast if the scanner binary is missing rather than letting the first
+	// scan silently fail and show a cryptic error in the UI.
+	scanBin := envOr("DING_SCANNER_BIN", "/usr/local/bin/scanner")
+	if _, err := os.Stat(scanBin); err != nil {
+		log.Fatalf("scanner binary not found at %s — set DING_SCANNER_BIN to the correct path", scanBin)
+	}
+
 	// Open (or create) the SQLite database where we save scan history
-	store, err := storage.NewSQLite(cfg.dataPath)
+	store, err := storage.NewSQLite(cfg.dataPath, os.Getenv("DING_SECRET_KEY"))
 	if err != nil {
 		log.Fatalf("storage: %v", err)
+	}
+	if os.Getenv("DING_SECRET_KEY") == "" {
+		log.Printf("warning: DING_SECRET_KEY not set — SMTP passwords stored in plaintext")
 	}
 
 	// scanFn is a reusable function that runs one complete scan cycle:
@@ -253,12 +263,37 @@ func main() {
 	}
 
 	// Start the HTTP server in the background (it blocks inside its goroutine)
-	httpSrv := &http.Server{Addr: cfg.httpAddr, Handler: srv}
+	httpSrv := &http.Server{
+		Addr:        cfg.httpAddr,
+		Handler:     srv,
+		ReadTimeout: 15 * time.Second,
+		IdleTimeout: 120 * time.Second,
+		// No WriteTimeout: the SSE endpoint (/api/events) streams indefinitely.
+	}
 	log.Printf("listening on %s  (interface=%s  subnet=%s)", cfg.httpAddr, cfg.iface, cfg.subnet)
 
 	// Listen for Ctrl+C (SIGINT) or docker stop (SIGTERM) so we can shut down cleanly
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Start background cleanup goroutines (expired sessions, OAuth state tokens).
+	srv.StartCleanup(ctx)
+
+	// Prune old DB records daily: scans older than 90 days, change-log older than 30 days.
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := store.PruneOldData(90*24*time.Hour, 30*24*time.Hour); err != nil {
+					log.Printf("prune: %v", err)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	// Start passive ARP listener — watches ARP traffic and instantly notifies
 	// the UI when a device appears without waiting for the next scheduled scan.

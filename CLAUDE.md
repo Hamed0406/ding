@@ -125,6 +125,7 @@ git tag v1.2.3 && git push origin v1.2.3
 | `DING_SCANNER_BIN` | `/usr/local/bin/scanner` | Override Rust binary path |
 | `DING_TELEGRAM_TOKEN` | _(empty)_ | Global fallback Telegram bot token (per-user config takes precedence) |
 | `DING_TELEGRAM_CHAT_ID` | _(empty)_ | Global fallback Telegram chat/channel ID |
+| `DING_SECRET_KEY` | _(empty)_ | Passphrase for AES-256-GCM encryption of SMTP passwords in SQLite. Generate: `openssl rand -base64 32`. If unset, passwords stored in plaintext (warning logged). Encrypted values prefixed `enc:v1:`; plain values pass through unchanged (backwards compatible). See `internal/storage/crypto.go`. |
 
 ## Key constraints
 
@@ -212,5 +213,5 @@ main.go
 - **New settings section** → add a panel to `SettingsPage.tsx`, add GET/PUT/test handlers + routes following the Telegram/webhook pattern.
 - **New UI component** → add under `ui/src/components/`, wire into `App.tsx`.
 - **Scheduling / daemon mode** → already implemented; tune `DING_SCAN_INTERVAL`.
-- **New storage backend** (e.g. Postgres) → implement `storage.Store` (15 methods: `Save`, `Latest`, `LatestRecord`, `History`, `AllKnownIPs`, `AllDevices`, `DeviceHistory`, `SetLabel`, `DeleteLabel`, `GetLabels`, `SetNotify`, `SaveSpeedtest`, `SpeedtestHistory`) and `storage.UserStore` (12 methods: `CreateUser`, `FindUserByEmail`, `FindUserByProvider`, `LinkProvider`, `UserCount`, `SaveTelegramConfig`, `GetTelegramConfig`, `GetAllTelegramConfigs`, `SaveWebhookURL`, `GetWebhookURL`, `GetAllWebhookURLs`, `SaveEmailConfig`, `GetEmailConfig`, `GetAllEmailConfigs`), then swap `storage.NewSQLite` for your constructor in `main.go`.
+- **New storage backend** (e.g. Postgres) → implement `storage.Store` (18 methods: `Save`, `Latest`, `LatestRecord`, `History`, `AllKnownIPs`, `AllDevices`, `DeviceHistory`, `SetLabel`, `DeleteLabel`, `GetLabels`, `SetNotify`, `SaveSpeedtest`, `SpeedtestHistory`, `SaveChanges`, `Changes`, `UpdateMACHistory`, `ARPConflicts`, `PruneOldData`) and `storage.UserStore` (14 methods: `CreateUser`, `FindUserByEmail`, `FindUserByProvider`, `LinkProvider`, `UserCount`, `SaveTelegramConfig`, `GetTelegramConfig`, `GetAllTelegramConfigs`, `SaveWebhookURL`, `GetWebhookURL`, `GetAllWebhookURLs`, `SaveEmailConfig`, `GetEmailConfig`, `GetAllEmailConfigs`), then swap `storage.NewSQLite` for your constructor in `main.go`.
 - **SQLite schema migrations** → append `_, _ = db.Exec(...)` calls to `sqliteMigrate()` in `sqlite_store.go`; existing databases are migrated automatically on startup. Never use `CREATE TABLE` without `IF NOT EXISTS` and never drop columns.

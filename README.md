@@ -8,6 +8,54 @@ A fast network scanner that answers: who is on your network, what are they, and 
 
 ## Install
 
+### One-line install
+
+**Linux** — installs via Docker or as a native systemd service (you choose):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hamed0406/ding/main/scripts/install.sh | sudo bash
+```
+
+**Windows** (PowerShell as Administrator) — installs via Docker Desktop or as a native Windows Service (you choose):
+
+```powershell
+irm https://raw.githubusercontent.com/hamed0406/ding/main/scripts/install.ps1 | iex
+```
+
+Or download and inspect first (recommended):
+
+```bash
+# Linux
+curl -fsSL https://raw.githubusercontent.com/hamed0406/ding/main/scripts/install.sh -o install.sh
+cat install.sh          # review before running
+sudo bash install.sh
+```
+
+```powershell
+# Windows (PowerShell as Administrator)
+Invoke-WebRequest https://raw.githubusercontent.com/hamed0406/ding/main/scripts/install.ps1 -OutFile install.ps1
+Get-Content install.ps1 | more   # review before running
+.\install.ps1
+```
+
+Both scripts:
+- Ask whether to use Docker or a native binary (Docker is the default)
+- Check all prerequisites before proceeding and offer to install missing ones
+- Create the install directory (`/opt/ding` on Linux, `C:\Program Files\Ding` on Windows)
+- Generate a random `DING_SECRET_KEY` automatically and save it to `.env`
+- Optionally set up Telegram alerts interactively
+- Start Ding and print the URL + your secret key (back it up!)
+
+> **Linux native binary:** the script installs a `systemd` service and sets `CAP_NET_RAW`/`CAP_NET_ADMIN` on the scanner binary so it does not need to run as root.
+>
+> **Windows native binary:** requires [Npcap](https://npcap.com) for ARP/ICMP — the script offers to download and install it for you.
+>
+> **Docker on Windows won't scan your LAN:** Docker Desktop runs inside a Linux VM; `network_mode: host` attaches the VM's virtual NIC, not your real adapter. Use the native binary option on Windows for full LAN scanning.
+
+For other platforms see below.
+
+---
+
 Pick your platform:
 
 - [Linux — Docker / Docker Compose](#linux--docker--docker-compose-recommended)
@@ -468,6 +516,7 @@ All options are set via environment variables (or `.env` file when using the pro
 | `DING_SCANNER_BIN` | `/usr/local/bin/scanner` | Path to the Rust scanner binary |
 | `DING_TELEGRAM_TOKEN` | _(empty)_ | Global fallback Telegram bot token |
 | `DING_TELEGRAM_CHAT_ID` | _(empty)_ | Global fallback Telegram chat ID |
+| `DING_SECRET_KEY` | _(empty)_ | Encrypts SMTP passwords stored in SQLite (AES-256-GCM). Generate with `openssl rand -base64 32`. If unset, passwords are stored in plaintext and a warning is logged. See [Protecting your SMTP password](#protecting-your-smtp-password-ding_secret_key). |
 | `DING_BASE_URL` | _(empty)_ | Public URL — required behind a reverse proxy for OAuth |
 | `DING_GOOGLE_CLIENT_ID` | _(empty)_ | Google OAuth client ID |
 | `DING_GOOGLE_CLIENT_SECRET` | _(empty)_ | Google OAuth client secret |
@@ -514,6 +563,16 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/
 
 # SSE stream
 curl -N -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/events
+
+# Persistent change log (last 200 events, newest first)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/changes
+
+# ARP watch — IPs seen with more than one MAC (spoofing candidates)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/arpwatch
+
+# Export all devices as CSV (default) or JSON
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/devices/export
+curl -H "Authorization: Bearer $TOKEN" "http://localhost:8081/api/devices/export?format=json"
 
 # Get / save webhook URL
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/settings/webhook
@@ -581,6 +640,33 @@ Set host to `localhost` (or the relay hostname), port to `25` (Postfix) or `1025
 > Then configure host=`localhost`, port=`1025`. Caught emails appear in Mailpit's web UI at **http://\<host\>:8025**.
 
 Click **Save**, then **Send test email** to confirm delivery before relying on it for alerts.
+
+#### Protecting your SMTP password (`DING_SECRET_KEY`)
+
+By default Ding stores your SMTP password in the SQLite database in plain text. If someone copies the database file they can read it.
+
+Setting `DING_SECRET_KEY` tells Ding to encrypt the password with AES-256-GCM before saving it. The key never leaves your server.
+
+**Step 1 — generate a key** (run once, keep it safe):
+
+```bash
+openssl rand -base64 32
+# example output: 4X3mK9vPqRzL2YwN8TdJcHbF7sAeUiGo1nQxZyCpVkW=
+```
+
+**Step 2 — add it to your `.env`** (Docker) or environment:
+
+```bash
+DING_SECRET_KEY=4X3mK9vPqRzL2YwN8TdJcHbF7sAeUiGo1nQxZyCpVkW=
+```
+
+**Step 3 — restart Ding.** Re-open Settings → Email, re-enter your SMTP password, and click Save. The password is now stored encrypted.
+
+> **Already have a saved password?**  
+> Existing plain-text passwords keep working after you set `DING_SECRET_KEY` — Ding detects unencrypted values automatically. However, they remain unencrypted in the DB until you re-save them through the Settings UI.
+
+> **Lost the key?**  
+> Without the key, stored passwords cannot be decrypted. Ding will log an error and email alerts will stop. Re-enter your SMTP password in Settings → Email after restoring the key.
 
 ### Webhooks
 

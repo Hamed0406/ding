@@ -22,7 +22,6 @@
 package enrich
 
 import (
-	"crypto/tls"
 	"io"
 	"net/http"
 	"regexp"
@@ -97,16 +96,9 @@ var titleFingerprints = []struct {
 // that couldn't be classified by vendor or port rules alone.
 // workers controls parallelism; timeout applies per HTTP request.
 func BannerDeviceType(results []scanner.Result, workers int, timeout time.Duration) {
-	// LAN devices (routers, cameras, NAS boxes) commonly present self-signed or
-	// expired TLS certificates. We are only reading a banner (Server header / title)
-	// from devices already discovered on the local network — not transmitting secrets —
-	// so skipping certificate verification is intentional and acceptable here.
-	// #nosec G402 -- intentional: LAN-only banner probe, no secrets transmitted
-	tlsCfg := &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 	client := &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
-			TLSClientConfig:   tlsCfg,
 			DisableKeepAlives: true,
 		},
 		// Don't follow redirects — the initial response Server header is what we want.

@@ -126,6 +126,9 @@ type Store interface {
 	// ARPConflicts returns all IPs that have been seen with more than one distinct
 	// MAC address, along with their full MAC history (newest first).
 	ARPConflicts() []ARPWatchEntry
+	// PruneOldData removes scan records older than scanAge and change-log entries
+	// older than changeAge. Call periodically to prevent unbounded DB growth.
+	PruneOldData(scanAge, changeAge time.Duration) error
 }
 
 // JSONStore is the legacy Store implementation: a single JSON file on disk.
@@ -278,6 +281,7 @@ func (s *JSONStore) SaveChanges(_ []diff.Change, _ time.Time) error             
 func (s *JSONStore) Changes(_ int) []ChangeLogEntry                                { return nil }
 func (s *JSONStore) UpdateMACHistory(_ []scanner.Result) ([]MACChange, error)      { return nil, nil }
 func (s *JSONStore) ARPConflicts() []ARPWatchEntry                                 { return nil }
+func (s *JSONStore) PruneOldData(_, _ time.Duration) error                         { return nil }
 
 func (s *JSONStore) labelsPath() string { return s.path + ".labels" }
 

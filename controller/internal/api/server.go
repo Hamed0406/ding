@@ -11,6 +11,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"embed"
 	"encoding/hex"
@@ -80,6 +81,28 @@ type sessionStore struct {
 
 func newSessionStore() *sessionStore {
 	return &sessionStore{tokens: make(map[string]sessionEntry)}
+}
+
+func (ss *sessionStore) startCleanup(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(30 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				now := time.Now()
+				ss.mu.Lock()
+				for tok, e := range ss.tokens {
+					if now.After(e.expiry) {
+						delete(ss.tokens, tok)
+					}
+				}
+				ss.mu.Unlock()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 }
 
 func (ss *sessionStore) create(userID int64) string {
@@ -207,7 +230,9 @@ type exchangeEntry struct {
 // a regular fetch response that Cloudflare does not modify.
 func (s *Server) newExchangeToken(userID int64) string {
 	b := make([]byte, 16)
-	rand.Read(b) //nolint:errcheck
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand: " + err.Error())
+	}
 	token := hex.EncodeToString(b)
 	s.exchangeTokens.Store(token, exchangeEntry{expiry: time.Now().Add(60 * time.Second), userID: userID})
 	return token
@@ -230,7 +255,9 @@ func (s *Server) consumeExchangeToken(token string) (int64, bool) {
 // newOAuthState generates a random state token and stores it for 10 minutes.
 func (s *Server) newOAuthState() string {
 	b := make([]byte, 16)
-	rand.Read(b) //nolint:errcheck
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand: " + err.Error())
+	}
 	state := hex.EncodeToString(b)
 	s.oauthStates.Store(state, time.Now().Add(10*time.Minute))
 	return state
@@ -309,9 +336,66 @@ func NewServer(cfg Config, store storage.Store, users storage.UserStore, broker 
 	return s
 }
 
+// StartCleanup launches background goroutines that prune expired in-memory tokens.
+// Call once, passing the application shutdown context so goroutines exit cleanly.
+func (s *Server) StartCleanup(ctx context.Context) {
+	s.sessions.startCleanup(ctx)
+
+	// Prune expired OAuth state tokens (10-minute TTL).
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				now := time.Now()
+				s.oauthStates.Range(func(k, v any) bool {
+					if now.After(v.(time.Time)) {
+						s.oauthStates.Delete(k)
+					}
+					return true
+				})
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Prune expired one-time exchange tokens (60-second TTL).
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				now := time.Now()
+				s.exchangeTokens.Range(func(k, v any) bool {
+					if now.After(v.(exchangeEntry).expiry) {
+						s.exchangeTokens.Delete(k)
+					}
+					return true
+				})
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+// securityHeaders adds defensive HTTP response headers to every response.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // ServeHTTP makes *Server satisfy http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB cap on all request bodies
+	securityHeaders(s.mux).ServeHTTP(w, r)
 }
 
 // TriggerScan starts a scan in the background if one isn't already running.

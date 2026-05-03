@@ -15,14 +15,18 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"time"
 )
+
+// oauthHTTPClient is used for all provider user-info API calls.
+// A dedicated client with a timeout prevents goroutine leaks if the provider hangs.
+var oauthHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 // authError redirects to the login page with a human-readable error message.
 // This is always used instead of http.Error so the user never sees a blank page.
@@ -59,7 +63,7 @@ func (s *Server) handleOAuthCallback(provider string) http.HandlerFunc {
 		// Exchange authorization code for access token
 		cfg := s.oauthConfig(r, provider)
 		log.Printf("OAuth callback (%s): state valid, exchanging code for token (redirectURI=%s)", provider, cfg.RedirectURL)
-		token, err := cfg.Exchange(context.Background(), r.URL.Query().Get("code"))
+		token, err := cfg.Exchange(r.Context(), r.URL.Query().Get("code"))
 		if err != nil {
 			log.Printf("OAuth token exchange failed (%s): %v", provider, err)
 			authError(w, r, "authentication failed — please try again")
@@ -69,11 +73,11 @@ func (s *Server) handleOAuthCallback(provider string) http.HandlerFunc {
 		// Fetch the user's email from the provider API
 		email, providerID, err := fetchOAuthUser(provider, token.AccessToken)
 		if err != nil || email == "" {
-			log.Printf("OAuth user fetch failed (%s): email=%q err=%v", provider, email, err)
+			log.Printf("OAuth user fetch failed (%s): err=%v", provider, err)
 			authError(w, r, "could not retrieve your email from "+provider)
 			return
 		}
-		log.Printf("OAuth (%s): got email=%s providerID=%s", provider, email, providerID)
+		log.Printf("OAuth (%s): user lookup OK", provider)
 
 		// Find existing user linked to this provider identity
 		user, err := s.users.FindUserByProvider(provider, providerID)
@@ -99,7 +103,7 @@ func (s *Server) handleOAuthCallback(provider string) http.HandlerFunc {
 					authError(w, r, "could not create account")
 					return
 				}
-				log.Printf("OAuth (%s): created new user id=%d email=%s", provider, user.ID, email)
+				log.Printf("OAuth (%s): created new user id=%d", provider, user.ID)
 			}
 			// Link this provider so future logins skip the email lookup
 			_ = s.users.LinkProvider(user.ID, provider, providerID)
@@ -128,7 +132,7 @@ func fetchOAuthUser(provider, accessToken string) (email, id string, err error) 
 func fetchGoogleUser(accessToken string) (email, id string, err error) {
 	req, _ := http.NewRequest("GET", "https://www.googleapis.com/oauth2/v3/userinfo", nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := oauthHTTPClient.Do(req)
 	if err != nil {
 		return "", "", err
 	}
@@ -148,7 +152,7 @@ func fetchGitHubUser(accessToken string) (email, id string, err error) {
 	req, _ := http.NewRequest("GET", "https://api.github.com/user", nil)
 	req.Header.Set("Authorization", "token "+accessToken)
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := oauthHTTPClient.Do(req)
 	if err != nil {
 		return "", "", err
 	}
