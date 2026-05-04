@@ -356,3 +356,65 @@ func TestSQLiteStore_GetAllEmailConfigs_OnlyComplete(t *testing.T) {
 		t.Errorf("Host: want smtp.example.com, got %q", cfgs[0].Host)
 	}
 }
+
+// ── Telegram all-users ────────────────────────────────────────────────────────
+
+func TestSQLiteStore_GetAllTelegramConfigs(t *testing.T) {
+	s := newTestStore(t)
+
+	if cfgs := s.GetAllTelegramConfigs(); len(cfgs) != 0 {
+		t.Errorf("want empty before any config, got %d", len(cfgs))
+	}
+
+	u, _ := s.CreateUser("tg@example.com", "hash")
+	if err := s.SaveTelegramConfig(u.ID, "bot123token", "chatid456"); err != nil {
+		t.Fatalf("SaveTelegramConfig: %v", err)
+	}
+
+	cfgs := s.GetAllTelegramConfigs()
+	if len(cfgs) != 1 {
+		t.Fatalf("want 1 config, got %d", len(cfgs))
+	}
+	if cfgs[0].Token != "bot123token" {
+		t.Errorf("Token: want bot123token, got %q", cfgs[0].Token)
+	}
+	if cfgs[0].ChatID != "chatid456" {
+		t.Errorf("ChatID: want chatid456, got %q", cfgs[0].ChatID)
+	}
+}
+
+// ── Webhook all-users ─────────────────────────────────────────────────────────
+
+func TestSQLiteStore_GetAllWebhookURLs(t *testing.T) {
+	s := newTestStore(t)
+
+	if urls := s.GetAllWebhookURLs(); len(urls) != 0 {
+		t.Errorf("want empty before any config, got %d", len(urls))
+	}
+
+	u1, _ := s.CreateUser("wh1@example.com", "hash")
+	u2, _ := s.CreateUser("wh2@example.com", "hash")
+	s.SaveWebhookURL(u1.ID, "https://hooks.example.com/1") //nolint:errcheck
+	s.SaveWebhookURL(u2.ID, "https://hooks.example.com/2") //nolint:errcheck
+
+	urls := s.GetAllWebhookURLs()
+	if len(urls) != 2 {
+		t.Fatalf("want 2 URLs, got %d", len(urls))
+	}
+}
+
+func TestSQLiteStore_WebhookURL_GetSet(t *testing.T) {
+	s := newTestStore(t)
+	u, _ := s.CreateUser("wh@example.com", "hash")
+
+	if err := s.SaveWebhookURL(u.ID, "https://example.com/hook"); err != nil {
+		t.Fatalf("SaveWebhookURL: %v", err)
+	}
+	got, err := s.GetWebhookURL(u.ID)
+	if err != nil {
+		t.Fatalf("GetWebhookURL: %v", err)
+	}
+	if got != "https://example.com/hook" {
+		t.Errorf("want https://example.com/hook, got %q", got)
+	}
+}

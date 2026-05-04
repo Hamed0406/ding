@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"encoding/base64"
+	"strings"
 	"testing"
 	"time"
 )
@@ -91,6 +93,31 @@ func TestDecrypt_TooShortPayload(t *testing.T) {
 	_, err := decryptPassword(testPass, short)
 	if err == nil {
 		t.Fatal("expected error for payload shorter than salt")
+	}
+}
+
+func TestDecrypt_DataShorterThanNonce(t *testing.T) {
+	// 20 bytes total: 16 salt + 4 data — data is shorter than GCM nonce size (12).
+	payload := make([]byte, 20)
+	encoded := encPrefix + base64.StdEncoding.EncodeToString(payload)
+	_, err := decryptPassword(testPass, encoded)
+	if err == nil {
+		t.Fatal("expected error when data is shorter than nonce size")
+	}
+}
+
+func TestDecrypt_TamperedCiphertext(t *testing.T) {
+	enc, err := encryptPassword(testPass, "hunter2")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	// Flip the last byte of the ciphertext to break GCM authentication.
+	raw, _ := base64.StdEncoding.DecodeString(strings.TrimPrefix(enc, encPrefix))
+	raw[len(raw)-1] ^= 0xFF
+	tampered := encPrefix + base64.StdEncoding.EncodeToString(raw)
+	_, err = decryptPassword(testPass, tampered)
+	if err == nil {
+		t.Fatal("expected error for tampered ciphertext")
 	}
 }
 
