@@ -137,3 +137,50 @@ func TestResolveInterface_NotFound(t *testing.T) {
 		t.Error("want error for nonexistent interface")
 	}
 }
+
+func TestResolveInterface_EmptyHint(t *testing.T) {
+	// Auto-detect the first available interface; skip if none present (e.g. minimal CI).
+	iface, err := resolveInterface("")
+	if err != nil {
+		t.Skip("no suitable network interface available:", err)
+	}
+	if iface.Name == "" {
+		t.Error("want a non-empty interface name")
+	}
+	if iface.Subnet == "" {
+		t.Error("want a non-empty subnet")
+	}
+}
+
+func TestResolveInterface_ValidHint(t *testing.T) {
+	// Find any available interface, then resolve by name explicitly.
+	first, err := resolveInterface("")
+	if err != nil {
+		t.Skip("no suitable network interface available:", err)
+	}
+	result, err := resolveInterface(first.Name)
+	if err != nil {
+		t.Fatalf("resolveInterface(%q): %v", first.Name, err)
+	}
+	if result.Name != first.Name {
+		t.Errorf("want %q, got %q", first.Name, result.Name)
+	}
+}
+
+func TestConfigFromEnv_SubnetAutoDetect(t *testing.T) {
+	// Set iface but not subnet — should auto-detect subnet from the interface.
+	t.Setenv("DING_INTERFACE", "eth0")
+	t.Setenv("DING_SUBNET", "")
+
+	cfg, err := configFromEnv()
+	if err != nil {
+		// In CI without eth0, auto-detect may legitimately fail; skip.
+		t.Skip("auto-detect failed (no eth0 or no subnet):", err)
+	}
+	if cfg.iface != "eth0" {
+		t.Errorf("iface: want eth0, got %q", cfg.iface)
+	}
+	if cfg.subnet == "" {
+		t.Error("subnet should have been auto-detected")
+	}
+}

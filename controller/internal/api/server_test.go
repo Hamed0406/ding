@@ -1135,6 +1135,100 @@ func TestTriggerScan_DoesNotPanic(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 }
 
+// ── handleTestWebhook success ─────────────────────────────────────────────────
+
+func TestTestWebhook_Success(t *testing.T) {
+	received := make(chan struct{}, 1)
+	hookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		received <- struct{}{}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer hookSrv.Close()
+
+	e := newEnv(t)
+	tok := e.register(t)
+	e.authPut(t, tok, "/api/settings/webhook",
+		fmt.Sprintf(`{"url":%q}`, hookSrv.URL)).Body.Close()
+
+	resp := e.authPost(t, tok, "/api/settings/webhook/test", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	select {
+	case <-received:
+	case <-time.After(5 * time.Second):
+		t.Error("webhook server was not called")
+	}
+}
+
+// ── handleDelLabel error-free path ───────────────────────────────────────────
+
+func TestDeleteLabel_InvalidIP(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authDelete(t, tok, "/api/devices/not-an-ip/label")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400 for invalid IP in delete label, got %d", resp.StatusCode)
+	}
+}
+
+// ── handleSaveTelegram bad JSON ───────────────────────────────────────────────
+
+func TestSaveTelegram_BadJSON(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authPut(t, tok, "/api/settings/telegram", "not-json")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400 for bad JSON, got %d", resp.StatusCode)
+	}
+}
+
+// ── handleSaveEmail bad JSON ─────────────────────────────────────────────────
+
+func TestSaveEmail_BadJSON(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authPut(t, tok, "/api/settings/email", "not-json")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400 for bad JSON, got %d", resp.StatusCode)
+	}
+}
+
+// ── handleSetLabel invalid IP ─────────────────────────────────────────────────
+
+func TestSetNotify_InvalidIP(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	resp := e.authPut(t, tok, "/api/devices/not-an-ip/notify", `{"enabled":true}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400 for invalid IP in notify path, got %d", resp.StatusCode)
+	}
+}
+
+// ── handleHistory non-empty ───────────────────────────────────────────────────
+
+func TestHistory_AfterScan(t *testing.T) {
+	e := newEnv(t)
+	tok := e.register(t)
+	e.store.Save(nil) //nolint:errcheck
+
+	resp := e.authGet(t, tok, "/api/history")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	var records []any
+	json.NewDecoder(resp.Body).Decode(&records)
+	if len(records) != 1 {
+		t.Errorf("want 1 record after scan, got %d", len(records))
+	}
+}
+
 // compile-time assertion: these imports are used
 var (
 	_ = bytes.NewReader
