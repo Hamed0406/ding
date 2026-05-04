@@ -1,16 +1,14 @@
 # Release pipeline — fires when you push a semver tag like v1.2.3.
 #
-# Jobs (run in parallel where possible):
-#   ui         — build React UI once; shared by all Go controller builds
-#   scanner    — build Rust scanner for 5 platforms (matrix)
-#   controller — build Go controller for 5 platforms (matrix); needs ui
-#   release    — package archives, attach to GitHub Release; needs scanner + controller
-#   docker     — multi-arch Docker image → Docker Hub + GHCR (independent)
+# Jobs:
+#   ui         — build React UI once; shared by Go controller builds
+#   scanner    — build Rust scanner for Linux + Windows
+#   controller — build Go controller for Linux + Windows; needs ui
+#   release    — package archives, attach to GitHub Release
+#   docker     — multi-arch Docker image → Docker Hub + GHCR
 #
-# Required repo secrets (Settings → Secrets → Actions):
+# Required repo secrets:
 #   DOCKERHUB_TOKEN — Docker Hub access token
-#
-# GHCR uses the built-in GITHUB_TOKEN — no extra secret needed.
 #
 # How to cut a release:
 #   git tag v1.2.3 && git push origin v1.2.3
@@ -23,22 +21,20 @@ on:
       - 'v*.*.*'
 
 permissions:
-  contents: write   # create GitHub Release + upload assets
-  packages: write   # push to ghcr.io
+  contents: write
+  packages: write
 
 env:
   DOCKERHUB_IMAGE: hamed0406/ding
 
 jobs:
-  # ── 1. Build React UI ───────────────────────────────────────────────────────
-  # Built once and shared as an artifact with all Go controller matrix builds.
   ui:
     name: UI
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
 
@@ -48,17 +44,11 @@ jobs:
       - run: npm run build
         working-directory: ui
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ui-dist
           path: ui/dist/
 
-  # ── 2. Build Rust scanner (matrix) ─────────────────────────────────────────
-  # Each entry produces one artifact: scanner-<platform>/{scanner|scanner.exe}
-  #
-  # Windows needs the Npcap SDK at build time (pnet links against wpcap).
-  # macOS uses BPF (kernel built-in) — no extra deps.
-  # Linux ARM64 cross-compiles via the aarch64-linux-gnu toolchain.
   scanner:
     name: Scanner (${{ matrix.artifact }})
     runs-on: ${{ matrix.os }}
@@ -80,34 +70,24 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact: windows-amd64
 
-          - os: macos-13           # Intel runner
-            target: x86_64-apple-darwin
-            artifact: macos-amd64
-
-          - os: macos-14           # Apple Silicon runner
-            target: aarch64-apple-darwin
-            artifact: macos-arm64
-
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # stable
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
         with:
           workspaces: scanner -> target
           key: ${{ matrix.target }}
 
       - name: Install ARM64 cross-linker
-        if: matrix.apt != ''
-        run: sudo apt-get install -y ${{ matrix.apt }}
+        if: matrix.apt
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.apt }}
 
-      # Download Npcap SDK so pnet can link against wpcap on Windows.
-      # Runtime note: end-users also need Npcap installed to run the binary.
-      - name: Install Npcap SDK (Windows)
+      - name: Install Npcap SDK Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -123,24 +103,20 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
 
-      - name: Upload (Unix)
+      - name: Upload Unix
         if: runner.os != 'Windows'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: scanner-${{ matrix.artifact }}
           path: scanner/target/${{ matrix.target }}/release/scanner
 
-      - name: Upload (Windows)
+      - name: Upload Windows
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: scanner-${{ matrix.artifact }}
           path: scanner/target/${{ matrix.target }}/release/scanner.exe
 
-  # ── 3. Build Go controller (matrix) ────────────────────────────────────────
-  # CGO_ENABLED=0 → fully static binary, no libc dependency.
-  # -ldflags="-s -w" strips debug info → ~30% smaller binaries.
-  # The UI artifact is injected into internal/api/static/ for go:embed.
   controller:
     name: Controller (${{ matrix.artifact }})
     needs: ui
@@ -162,23 +138,15 @@ jobs:
             artifact: windows-amd64
             ext: .exe
 
-          - goos: darwin
-            goarch: amd64
-            artifact: macos-amd64
-
-          - goos: darwin
-            goarch: arm64
-            artifact: macos-arm64
-
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: '1.25'
           cache-dependency-path: controller/go.sum
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: ui-dist
           path: controller/internal/api/static/
@@ -189,24 +157,21 @@ jobs:
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
             go build -ldflags="-s -w" -o ding${{ matrix.ext || '' }} ./cmd/ding
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: controller-${{ matrix.artifact }}
           path: controller/ding${{ matrix.ext || '' }}
 
-  # ── 4. Package and publish GitHub Release ───────────────────────────────────
-  # Downloads all scanner + controller artifacts, packages them into archives,
-  # generates SHA-256 checksums, and attaches everything to the GitHub Release.
   release:
     name: GitHub Release
     needs: [scanner, controller]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: artifacts/
 
@@ -214,25 +179,25 @@ jobs:
         run: |
           mkdir -p dist
 
-          for platform in linux-amd64 linux-arm64 macos-amd64 macos-arm64; do
+          for platform in linux-amd64 linux-arm64; do
             mkdir -p pkg
-            cp artifacts/scanner-${platform}/scanner  pkg/scanner
-            cp artifacts/controller-${platform}/ding  pkg/ding
+            cp artifacts/scanner-${platform}/scanner pkg/scanner
+            cp artifacts/controller-${platform}/ding pkg/ding
             chmod +x pkg/scanner pkg/ding
             tar -czf dist/ding-${platform}.tar.gz -C pkg scanner ding
             rm -rf pkg
           done
 
           mkdir -p pkg
-          cp artifacts/scanner-windows-amd64/scanner.exe  pkg/scanner.exe
-          cp artifacts/controller-windows-amd64/ding.exe  pkg/ding.exe
+          cp artifacts/scanner-windows-amd64/scanner.exe pkg/scanner.exe
+          cp artifacts/controller-windows-amd64/ding.exe pkg/ding.exe
           zip -j dist/ding-windows-amd64.zip pkg/scanner.exe pkg/ding.exe
           rm -rf pkg
 
           cd dist && sha256sum * > sha256sums.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
@@ -244,7 +209,7 @@ jobs:
             dist/*.zip
             dist/sha256sums.txt
           body: |
-            ## Docker (recommended for Linux)
+            ## Docker recommended for Linux
 
             ```bash
             docker pull ${{ env.DOCKERHUB_IMAGE }}:${{ github.ref_name }}
@@ -255,55 +220,51 @@ jobs:
 
             | Platform | Archive | Notes |
             |---|---|---|
-            | Linux x86\_64 | `ding-linux-amd64.tar.gz` | |
+            | Linux x86_64 | `ding-linux-amd64.tar.gz` | |
             | Linux ARM64 | `ding-linux-arm64.tar.gz` | Raspberry Pi, NAS |
-            | macOS Intel | `ding-macos-amd64.tar.gz` | Needs `sudo` for raw sockets |
-            | macOS Apple Silicon | `ding-macos-arm64.tar.gz` | Needs `sudo` for raw sockets |
-            | Windows x86\_64 | `ding-windows-amd64.zip` | Requires [Npcap](https://npcap.com) + run as Administrator |
+            | Windows x86_64 | `ding-windows-amd64.zip` | Requires Npcap + run as Administrator |
 
-            Each archive contains two binaries: `scanner` (Rust) + `ding` (Go controller with UI embedded).
+            Each archive contains two binaries: `scanner` Rust + `ding` Go controller with UI embedded.
 
             **Verify download:**
             ```bash
             sha256sum -c sha256sums.txt
             ```
 
-            **Quick start (Linux):**
+            **Quick start Linux:**
             ```bash
             tar xzf ding-linux-amd64.tar.gz
             sudo ./ding
             # UI at http://localhost:8081
             ```
 
-            **Quick start (Windows):**
-            1. Install [Npcap](https://npcap.com)
+            **Quick start Windows:**
+            1. Install Npcap
             2. Unzip `ding-windows-amd64.zip`
             3. Run `ding.exe` as Administrator
 
             ---
 
-  # ── 5. Docker multi-arch image ──────────────────────────────────────────────
-  # Runs independently — does not wait for the binary jobs.
-  # Pushes linux/amd64 + linux/arm64 to Docker Hub and GHCR.
   docker:
     name: Docker image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
 
-      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130  # v3
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           username: hamed0406
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -311,7 +272,7 @@ jobs:
 
       - name: Compute image tags
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051  # v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051
         with:
           images: |
             ${{ env.DOCKERHUB_IMAGE }}
@@ -327,7 +288,7 @@ jobs:
             org.opencontainers.image.description=Hybrid Rust+Go network scanner
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
           push: true
