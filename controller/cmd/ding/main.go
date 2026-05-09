@@ -15,19 +15,20 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/ding/ding/internal/alert"
 	"github.com/ding/ding/internal/api"
-	"github.com/ding/ding/internal/email"
 	"github.com/ding/ding/internal/classify"
 	"github.com/ding/ding/internal/diff"
+	"github.com/ding/ding/internal/email"
 	"github.com/ding/ding/internal/enrich"
 	"github.com/ding/ding/internal/iface"
 	"github.com/ding/ding/internal/scanner"
@@ -36,26 +37,31 @@ import (
 )
 
 func main() {
+	initLogger()
+
 	// Load all settings from environment variables (with sensible defaults)
 	cfg, err := configFromEnv()
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		slog.Error("config error", "err", err)
+		os.Exit(1)
 	}
 
 	// Fail fast if the scanner binary is missing rather than letting the first
 	// scan silently fail and show a cryptic error in the UI.
 	scanBin := envOr("DING_SCANNER_BIN", "/usr/local/bin/scanner")
 	if _, err := os.Stat(scanBin); err != nil {
-		log.Fatalf("scanner binary not found at %s — set DING_SCANNER_BIN to the correct path", scanBin)
+		slog.Error("scanner binary not found", "path", scanBin, "hint", "set DING_SCANNER_BIN to the correct path")
+		os.Exit(1)
 	}
 
 	// Open (or create) the SQLite database where we save scan history
 	store, err := storage.NewSQLite(cfg.dataPath, os.Getenv("DING_SECRET_KEY"))
 	if err != nil {
-		log.Fatalf("storage: %v", err)
+		slog.Error("storage error", "err", err)
+		os.Exit(1)
 	}
 	if os.Getenv("DING_SECRET_KEY") == "" {
-		log.Printf("warning: DING_SECRET_KEY not set — SMTP passwords stored in plaintext")
+		slog.Warn("DING_SECRET_KEY not set — SMTP passwords stored in plaintext")
 	}
 
 	// scanFn is a reusable function that runs one complete scan cycle:
@@ -81,7 +87,7 @@ func main() {
 			var err error
 			mdnsEvents, err = scanner.RunMDNS(cfg.iface, 3000)
 			if err != nil {
-				log.Printf("mDNS scan: %v (continuing without mDNS data)", err)
+				slog.Warn("mDNS scan failed, continuing without mDNS data", "err", err)
 			}
 		}()
 		wg.Wait()
@@ -135,7 +141,7 @@ func main() {
 		// the UI can show a warning badge.
 		macChanges, err := store.UpdateMACHistory(results)
 		if err != nil {
-			log.Printf("arp watch: %v", err)
+			slog.Error("arp watch", "err", err)
 		}
 		for i := range results {
 			for _, mc := range macChanges {
@@ -167,12 +173,12 @@ func main() {
 
 		// Save the new results to disk
 		if err := store.Save(results); err != nil {
-			log.Printf("save: %v", err)
+			slog.Error("save scan results", "err", err)
 		}
 
 		// Persist the change events so the history log survives page reloads.
 		if err := store.SaveChanges(changes, time.Now()); err != nil {
-			log.Printf("save changes: %v", err)
+			slog.Error("save changes", "err", err)
 		}
 
 		// Build the filtered change list: devices with notifications enabled, plus
@@ -202,12 +208,12 @@ func main() {
 		}
 		for _, tc := range telegramCfgs {
 			if err := alert.Send(alert.Config{TelegramToken: tc.Token, TelegramChatID: tc.ChatID}, alertChanges); err != nil {
-				log.Printf("alert: %v", err)
+				slog.Error("telegram alert", "err", err)
 			}
 		}
 		for _, webhookURL := range store.GetAllWebhookURLs() {
 			if err := alert.Send(alert.Config{WebhookURL: webhookURL}, alertChanges); err != nil {
-				log.Printf("alert webhook: %v", err)
+				slog.Error("webhook alert", "err", err)
 			}
 		}
 		if len(alertChanges) > 0 {
@@ -220,7 +226,7 @@ func main() {
 					From:     ec.From,
 					To:       ec.To,
 				}, alertChanges); err != nil {
-					log.Printf("alert email: %v", err)
+					slog.Error("email alert", "err", err)
 				}
 			}
 		}
@@ -270,7 +276,7 @@ func main() {
 		IdleTimeout: 120 * time.Second,
 		// No WriteTimeout: the SSE endpoint (/api/events) streams indefinitely.
 	}
-	log.Printf("listening on %s  (interface=%s  subnet=%s)", cfg.httpAddr, cfg.iface, cfg.subnet)
+	slog.Info("listening", "addr", cfg.httpAddr, "interface", cfg.iface, "subnet", cfg.subnet)
 
 	// Listen for Ctrl+C (SIGINT) or docker stop (SIGTERM) so we can shut down cleanly
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -287,7 +293,7 @@ func main() {
 			select {
 			case <-ticker.C:
 				if err := store.PruneOldData(90*24*time.Hour, 30*24*time.Hour); err != nil {
-					log.Printf("prune: %v", err)
+					slog.Error("prune old data", "err", err)
 				}
 			case <-ctx.Done():
 				return
@@ -302,13 +308,14 @@ func main() {
 
 	go func() {
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("http: %v", err)
+			slog.Error("http server error", "err", err)
+			os.Exit(1)
 		}
 	}()
 
 	// Block here until a shutdown signal arrives
 	<-ctx.Done()
-	log.Println("shutting down…")
+	slog.Info("shutting down")
 
 	// Give in-flight requests up to 5 seconds to finish before we exit
 	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -333,7 +340,7 @@ func runPassiveListener(ctx context.Context, iface string, store storage.Store, 
 
 		events, err := scanner.Listen(ctx, iface)
 		if err != nil {
-			log.Printf("passive ARP listener: %v — retrying in 5s", err)
+			slog.Warn("passive ARP listener failed, retrying in 5s", "err", err)
 			select {
 			case <-time.After(5 * time.Second):
 			case <-ctx.Done():
@@ -364,7 +371,7 @@ func runPassiveListener(ctx context.Context, iface string, store storage.Store, 
 		}
 
 		// events channel closed — scanner process exited; retry after a pause
-		log.Printf("passive ARP listener exited — retrying in 5s")
+		slog.Warn("passive ARP listener exited, retrying in 5s")
 		select {
 		case <-time.After(5 * time.Second):
 		case <-ctx.Done():
@@ -420,7 +427,7 @@ func configFromEnv() (config, error) {
 	if raw := os.Getenv("DING_SCAN_INTERVAL"); raw != "" {
 		d, err := time.ParseDuration(raw)
 		if err != nil {
-			log.Printf("invalid DING_SCAN_INTERVAL %q: %v (ignored)", raw, err)
+			slog.Warn("invalid DING_SCAN_INTERVAL, ignored", "value", raw, "err", err)
 		} else {
 			cfg.scanInterval = d
 		}
@@ -448,7 +455,7 @@ func configFromEnv() (config, error) {
 		if cfg.subnet == "" {
 			cfg.subnet = detected.Subnet
 		}
-		log.Printf("auto-detected interface=%s subnet=%s", cfg.iface, cfg.subnet)
+		slog.Info("auto-detected network interface", "interface", cfg.iface, "subnet", cfg.subnet)
 	}
 
 	return cfg, nil
@@ -494,4 +501,27 @@ func parseIntEnv(s string, dst *int) (int, error) {
 		*dst = n
 	}
 	return n, err
+}
+
+// initLogger configures the global slog logger from DING_LOG_LEVEL and DING_LOG_FORMAT.
+// DING_LOG_LEVEL: debug | info (default) | warn | error
+// DING_LOG_FORMAT: text (default) | json
+func initLogger() {
+	level := slog.LevelInfo
+	switch strings.ToLower(os.Getenv("DING_LOG_LEVEL")) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn", "warning":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
+	opts := &slog.HandlerOptions{Level: level}
+	var h slog.Handler
+	if strings.ToLower(os.Getenv("DING_LOG_FORMAT")) == "json" {
+		h = slog.NewJSONHandler(os.Stderr, opts)
+	} else {
+		h = slog.NewTextHandler(os.Stderr, opts)
+	}
+	slog.SetDefault(slog.New(h))
 }

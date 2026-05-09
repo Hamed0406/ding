@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -374,6 +376,115 @@ func TestSendMagicPacket_InvalidMAC(t *testing.T) {
 	err := sendMagicPacket("not-a-mac")
 	if err == nil {
 		t.Error("want error for invalid MAC address")
+	}
+}
+
+// ── responseRecorder ──────────────────────────────────────────────────────────
+
+func TestResponseRecorder_InitialStatusIsZero(t *testing.T) {
+	rr := &responseRecorder{ResponseWriter: httptest.NewRecorder()}
+	if rr.status != 0 {
+		t.Errorf("want initial status 0, got %d", rr.status)
+	}
+}
+
+func TestResponseRecorder_ExplicitStatus(t *testing.T) {
+	rr := &responseRecorder{ResponseWriter: httptest.NewRecorder()}
+	rr.WriteHeader(http.StatusNotFound)
+	if rr.status != http.StatusNotFound {
+		t.Errorf("want %d, got %d", http.StatusNotFound, rr.status)
+	}
+}
+
+func TestResponseRecorder_ImplicitOKOnWrite(t *testing.T) {
+	rr := &responseRecorder{ResponseWriter: httptest.NewRecorder()}
+	rr.Write([]byte("hello")) //nolint:errcheck
+	if rr.status != http.StatusOK {
+		t.Errorf("Write without WriteHeader should set status 200, got %d", rr.status)
+	}
+}
+
+func TestResponseRecorder_WriteHeaderNotOverwritten(t *testing.T) {
+	rr := &responseRecorder{ResponseWriter: httptest.NewRecorder()}
+	rr.WriteHeader(http.StatusCreated)
+	rr.Write([]byte("body")) //nolint:errcheck
+	if rr.status != http.StatusCreated {
+		t.Errorf("Write should not overwrite explicit WriteHeader; want 201, got %d", rr.status)
+	}
+}
+
+// ── accessLog middleware ──────────────────────────────────────────────────────
+
+// captureLog replaces the default slog handler with one writing to a buffer,
+// and restores the original on test cleanup.
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	orig := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(orig) })
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	return &buf
+}
+
+func TestAccessLog_LogsMethodAndPath(t *testing.T) {
+	buf := captureLog(t)
+	h := accessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/devices", nil))
+
+	out := buf.String()
+	if !strings.Contains(out, "GET") {
+		t.Errorf("log missing method GET: %q", out)
+	}
+	if !strings.Contains(out, "/api/devices") {
+		t.Errorf("log missing path /api/devices: %q", out)
+	}
+}
+
+func TestAccessLog_LogsExplicitStatus(t *testing.T) {
+	buf := captureLog(t)
+	h := accessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/api/scan", nil))
+
+	if !strings.Contains(buf.String(), "201") {
+		t.Errorf("log missing status 201: %q", buf.String())
+	}
+}
+
+func TestAccessLog_DefaultsTo200(t *testing.T) {
+	buf := captureLog(t)
+	h := accessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("ok")) //nolint:errcheck
+	}))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/status", nil))
+
+	if !strings.Contains(buf.String(), "200") {
+		t.Errorf("implicit 200 not logged: %q", buf.String())
+	}
+}
+
+func TestAccessLog_LogsRemoteAddr(t *testing.T) {
+	buf := captureLog(t)
+	h := accessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "10.0.0.5:12345"
+	h.ServeHTTP(httptest.NewRecorder(), r)
+
+	if !strings.Contains(buf.String(), "10.0.0.5:12345") {
+		t.Errorf("log missing remote addr: %q", buf.String())
+	}
+}
+
+func TestAccessLog_LogsLatencyField(t *testing.T) {
+	buf := captureLog(t)
+	h := accessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+
+	if !strings.Contains(buf.String(), "ms=") {
+		t.Errorf("log missing ms latency field: %q", buf.String())
 	}
 }
 

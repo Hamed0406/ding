@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"log/slog"
 	"testing"
 
 	"github.com/ding/ding/internal/scanner"
@@ -182,5 +184,102 @@ func TestConfigFromEnv_SubnetAutoDetect(t *testing.T) {
 	}
 	if cfg.subnet == "" {
 		t.Error("subnet should have been auto-detected")
+	}
+}
+
+// ── initLogger ────────────────────────────────────────────────────────────────
+
+func TestInitLogger_DefaultsToTextInfoLevel(t *testing.T) {
+	orig := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(orig) })
+	t.Setenv("DING_LOG_LEVEL", "")
+	t.Setenv("DING_LOG_FORMAT", "")
+	initLogger()
+
+	ctx := context.Background()
+	h := slog.Default().Handler()
+	if _, ok := h.(*slog.TextHandler); !ok {
+		t.Errorf("want TextHandler by default, got %T", h)
+	}
+	if !h.Enabled(ctx, slog.LevelInfo) {
+		t.Error("info should be enabled at default level")
+	}
+	if h.Enabled(ctx, slog.LevelDebug) {
+		t.Error("debug should not be enabled at default info level")
+	}
+}
+
+func TestInitLogger_JSONFormat(t *testing.T) {
+	orig := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(orig) })
+	t.Setenv("DING_LOG_FORMAT", "json")
+	t.Setenv("DING_LOG_LEVEL", "")
+	initLogger()
+
+	if _, ok := slog.Default().Handler().(*slog.JSONHandler); !ok {
+		t.Errorf("want JSONHandler for DING_LOG_FORMAT=json, got %T", slog.Default().Handler())
+	}
+}
+
+func TestInitLogger_DebugLevel(t *testing.T) {
+	orig := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(orig) })
+	t.Setenv("DING_LOG_LEVEL", "debug")
+	t.Setenv("DING_LOG_FORMAT", "")
+	initLogger()
+
+	ctx := context.Background()
+	if !slog.Default().Handler().Enabled(ctx, slog.LevelDebug) {
+		t.Error("debug should be enabled when DING_LOG_LEVEL=debug")
+	}
+}
+
+func TestInitLogger_WarnLevelSuppressesInfo(t *testing.T) {
+	orig := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(orig) })
+	t.Setenv("DING_LOG_LEVEL", "warn")
+	t.Setenv("DING_LOG_FORMAT", "")
+	initLogger()
+
+	ctx := context.Background()
+	h := slog.Default().Handler()
+	if h.Enabled(ctx, slog.LevelInfo) {
+		t.Error("info should not be enabled at warn level")
+	}
+	if !h.Enabled(ctx, slog.LevelWarn) {
+		t.Error("warn should be enabled at warn level")
+	}
+}
+
+func TestInitLogger_ErrorLevelSuppressesWarn(t *testing.T) {
+	orig := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(orig) })
+	t.Setenv("DING_LOG_LEVEL", "error")
+	t.Setenv("DING_LOG_FORMAT", "")
+	initLogger()
+
+	ctx := context.Background()
+	h := slog.Default().Handler()
+	if h.Enabled(ctx, slog.LevelWarn) {
+		t.Error("warn should not be enabled at error level")
+	}
+	if !h.Enabled(ctx, slog.LevelError) {
+		t.Error("error should be enabled at error level")
+	}
+}
+
+func TestInitLogger_CaseInsensitiveLevel(t *testing.T) {
+	orig := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(orig) })
+	t.Setenv("DING_LOG_LEVEL", "DEBUG")
+	t.Setenv("DING_LOG_FORMAT", "JSON")
+	initLogger()
+
+	ctx := context.Background()
+	if !slog.Default().Handler().Enabled(ctx, slog.LevelDebug) {
+		t.Error("DEBUG (uppercase) should be accepted")
+	}
+	if _, ok := slog.Default().Handler().(*slog.JSONHandler); !ok {
+		t.Errorf("JSON (uppercase) should set JSONHandler, got %T", slog.Default().Handler())
 	}
 }

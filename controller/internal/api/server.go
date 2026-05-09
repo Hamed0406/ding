@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -385,6 +386,44 @@ func (s *Server) StartCleanup(ctx context.Context) {
 	}()
 }
 
+// responseRecorder wraps http.ResponseWriter to capture the status code for logging.
+type responseRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rr *responseRecorder) WriteHeader(code int) {
+	rr.status = code
+	rr.ResponseWriter.WriteHeader(code)
+}
+
+func (rr *responseRecorder) Write(b []byte) (int, error) {
+	if rr.status == 0 {
+		rr.status = http.StatusOK
+	}
+	return rr.ResponseWriter.Write(b)
+}
+
+// accessLog logs method, path, status code, latency, and remote IP for every request.
+func accessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rr := &responseRecorder{ResponseWriter: w}
+		next.ServeHTTP(rr, r)
+		status := rr.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		slog.Info("http",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", status,
+			"ms", time.Since(start).Milliseconds(),
+			"ip", r.RemoteAddr,
+		)
+	})
+}
+
 // securityHeaders adds defensive HTTP response headers to every response.
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -398,7 +437,7 @@ func securityHeaders(next http.Handler) http.Handler {
 // ServeHTTP makes *Server satisfy http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB cap on all request bodies
-	securityHeaders(s.mux).ServeHTTP(w, r)
+	accessLog(securityHeaders(s.mux)).ServeHTTP(w, r)
 }
 
 // TriggerScan starts a scan in the background if one isn't already running.

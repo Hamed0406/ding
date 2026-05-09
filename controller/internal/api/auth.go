@@ -18,7 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -31,7 +31,7 @@ var oauthHTTPClient = &http.Client{Timeout: 10 * time.Second}
 // authError redirects to the login page with a human-readable error message.
 // This is always used instead of http.Error so the user never sees a blank page.
 func authError(w http.ResponseWriter, r *http.Request, reason string) {
-	log.Printf("OAuth error: %s", reason)
+	slog.Warn("OAuth error", "reason", reason)
 	http.Redirect(w, r, "/?auth_error="+url.QueryEscape(reason), http.StatusFound)
 }
 
@@ -40,7 +40,7 @@ func (s *Server) handleOAuthRedirect(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := s.oauthConfig(r, provider)
 		state := s.newOAuthState()
-		log.Printf("OAuth redirect (%s): redirectURI=%s", provider, cfg.RedirectURL)
+		slog.Debug("OAuth redirect", "provider", provider, "redirect_uri", cfg.RedirectURL)
 		http.Redirect(w, r, cfg.AuthCodeURL(state), http.StatusFound)
 	}
 }
@@ -62,10 +62,10 @@ func (s *Server) handleOAuthCallback(provider string) http.HandlerFunc {
 
 		// Exchange authorization code for access token
 		cfg := s.oauthConfig(r, provider)
-		log.Printf("OAuth callback (%s): state valid, exchanging code for token (redirectURI=%s)", provider, cfg.RedirectURL)
+		slog.Debug("OAuth callback state valid, exchanging code for token", "provider", provider)
 		token, err := cfg.Exchange(r.Context(), r.URL.Query().Get("code"))
 		if err != nil {
-			log.Printf("OAuth token exchange failed (%s): %v", provider, err)
+			slog.Error("OAuth token exchange failed", "provider", provider, "err", err)
 			authError(w, r, "authentication failed — please try again")
 			return
 		}
@@ -73,16 +73,16 @@ func (s *Server) handleOAuthCallback(provider string) http.HandlerFunc {
 		// Fetch the user's email from the provider API
 		email, providerID, err := fetchOAuthUser(provider, token.AccessToken)
 		if err != nil || email == "" {
-			log.Printf("OAuth user fetch failed (%s): err=%v", provider, err)
+			slog.Error("OAuth user fetch failed", "provider", provider, "err", err)
 			authError(w, r, "could not retrieve your email from "+provider)
 			return
 		}
-		log.Printf("OAuth (%s): user lookup OK", provider)
+		slog.Debug("OAuth user lookup OK", "provider", provider)
 
 		// Find existing user linked to this provider identity
 		user, err := s.users.FindUserByProvider(provider, providerID)
 		if err != nil {
-			log.Printf("OAuth (%s): FindUserByProvider error: %v", provider, err)
+			slog.Error("OAuth FindUserByProvider failed", "provider", provider, "err", err)
 			authError(w, r, "database error")
 			return
 		}
@@ -91,7 +91,7 @@ func (s *Server) handleOAuthCallback(provider string) http.HandlerFunc {
 			// Check if a local account exists with the same email
 			user, err = s.users.FindUserByEmail(email)
 			if err != nil {
-				log.Printf("OAuth (%s): FindUserByEmail error: %v", provider, err)
+				slog.Error("OAuth FindUserByEmail failed", "provider", provider, "err", err)
 				authError(w, r, "database error")
 				return
 			}
@@ -99,16 +99,16 @@ func (s *Server) handleOAuthCallback(provider string) http.HandlerFunc {
 				// First OAuth login — create account automatically
 				user, err = s.users.CreateUser(email, "")
 				if err != nil {
-					log.Printf("OAuth (%s): CreateUser error: %v", provider, err)
+					slog.Error("OAuth CreateUser failed", "provider", provider, "err", err)
 					authError(w, r, "could not create account")
 					return
 				}
-				log.Printf("OAuth (%s): created new user id=%d", provider, user.ID)
+				slog.Info("OAuth created new user", "provider", provider, "user_id", user.ID)
 			}
 			// Link this provider so future logins skip the email lookup
 			_ = s.users.LinkProvider(user.ID, provider, providerID)
 		}
-		log.Printf("OAuth (%s): user id=%d authenticated", provider, user.ID)
+		slog.Info("OAuth user authenticated", "provider", provider, "user_id", user.ID)
 
 		exchangeTok := s.newExchangeToken(user.ID)
 		// Use the URL fragment (#exchange=TOKEN) instead of a query parameter.

@@ -39,7 +39,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -765,7 +765,7 @@ func (s *Server) handleTestEmail(w http.ResponseWriter, r *http.Request) {
 		From:     cfg.From,
 		To:       cfg.To,
 	}); err != nil {
-		log.Printf("email test failed (%s:%d): %v", cfg.Host, cfg.Port, err)
+		slog.Error("email test failed", "host", cfg.Host, "port", cfg.Port, "err", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}

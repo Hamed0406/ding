@@ -126,6 +126,8 @@ git tag v1.2.3 && git push origin v1.2.3
 | `DING_TELEGRAM_TOKEN` | _(empty)_ | Global fallback Telegram bot token (per-user config takes precedence) |
 | `DING_TELEGRAM_CHAT_ID` | _(empty)_ | Global fallback Telegram chat/channel ID |
 | `DING_SECRET_KEY` | _(empty)_ | Passphrase for AES-256-GCM encryption of SMTP passwords in SQLite. Generate: `openssl rand -base64 32`. If unset, passwords stored in plaintext (warning logged). Encrypted values prefixed `enc:v1:`; plain values pass through unchanged (backwards compatible). See `internal/storage/crypto.go`. |
+| `DING_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
+| `DING_LOG_FORMAT` | `text` | Log format: `text` (human-readable) or `json` (for production log aggregators) |
 
 ## Key constraints
 
