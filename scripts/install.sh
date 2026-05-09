@@ -338,6 +338,12 @@ header "Installing binaries"
 install -o root -g root -m 755 "$TMP_DIR/ding" /usr/local/bin/ding
 install -o root -g root -m 755 "$TMP_DIR/scanner" /usr/local/bin/scanner
 
+# Record installed version so update.sh can compare against GitHub releases.
+INSTALLED_TAG=$(FETCH_OUT "https://api.github.com/repos/hamed0406/ding/releases/latest" 2>/dev/null \
+  | grep '"tag_name"' | head -1 | cut -d'"' -f4 || true)
+mkdir -p /usr/local/share/ding
+echo "${INSTALLED_TAG:-unknown}" > /usr/local/share/ding/VERSION
+
 if command -v setcap &>/dev/null; then
   setcap 'cap_net_raw,cap_net_admin+eip' /usr/local/bin/scanner
   success "Capabilities set on scanner binary cap_net_raw, cap_net_admin"
@@ -519,6 +525,50 @@ systemctl enable --now ding
 
 success "systemd service 'ding' enabled and started"
 
+# ── Optional auto-update timer ─────────────────────────────────────────────────
+echo ""
+echo "Enable automatic daily updates? Ding will check GitHub for new releases"
+echo "every night and update itself automatically (restarts for ~2 s)."
+read -rp "Enable auto-updates? [y/N]: " SETUP_AUTOUPDATE
+
+if [[ "${SETUP_AUTOUPDATE,,}" == "y" ]]; then
+  SCRIPT_PATH="$(realpath "$0" 2>/dev/null || echo "/opt/ding/scripts/install.sh")"
+  UPDATE_SCRIPT="$(dirname "$SCRIPT_PATH")/update.sh"
+
+  cat > /etc/systemd/system/ding-update.service <<EOF
+[Unit]
+Description=Ding auto-update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash ${UPDATE_SCRIPT}
+StandardOutput=journal
+StandardError=journal
+EOF
+
+  cat > /etc/systemd/system/ding-update.timer <<EOF
+[Unit]
+Description=Ding daily auto-update check
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now ding-update.timer
+  success "Auto-update timer enabled — Ding will update automatically each night"
+else
+  info "Skipped. To enable later: sudo bash scripts/update.sh --install-timer"
+  info "To update manually:       sudo bash scripts/update.sh"
+fi
+
 # ── Open firewall port optional ────────────────────────────────────────────────
 if command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
   ufw allow 8081/tcp comment "Ding web UI" &>/dev/null || true
@@ -563,12 +613,13 @@ echo "  First visit: create your account email + password."
 echo "  Then Ding will scan your network automatically."
 echo ""
 echo -e "${BOLD}Useful commands:${RESET}"
-echo "  View logs:   journalctl -u ding -f"
-echo "  Stop:        systemctl stop ding"
-echo "  Start:       systemctl start ding"
-echo "  Restart:     systemctl restart ding"
-echo "  Status:      systemctl status ding"
-echo "  Update:      bash <(curl -fsSL https://raw.githubusercontent.com/hamed0406/ding/main/scripts/install.sh)"
+echo "  View logs:       journalctl -u ding -f"
+echo "  Stop:            systemctl stop ding"
+echo "  Start:           systemctl start ding"
+echo "  Restart:         systemctl restart ding"
+echo "  Status:          systemctl status ding"
+echo "  Update now:      sudo bash scripts/update.sh"
+echo "  Check version:   sudo bash scripts/update.sh --check"
 echo ""
 echo -e "${YELLOW}${BOLD}Keep these safe:${RESET}"
 echo "  $INSTALL_DIR/.env          ← config and secret key"

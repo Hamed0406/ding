@@ -1,5 +1,9 @@
 services:
   ding:
+    # image= tells Docker Compose (and Watchtower) which Docker Hub image to use.
+    # build= is kept so `docker compose build` still works for local development.
+    # On production, run `docker compose pull && docker compose up -d` instead of building.
+    image: hamed0406/ding:latest
     build: .
     # ARP must see the LAN — host networking is mandatory
     network_mode: host
@@ -15,6 +19,18 @@ services:
     restart: unless-stopped
     # Note: port mapping is ignored with network_mode: host.
     # Access the UI at http://<host-ip>:8081
+
+  # Watchtower watches Docker Hub for a new `hamed0406/ding:latest` image every 5 minutes.
+  # When you push a new release tag (git tag v1.x.y && git push origin v1.x.y),
+  # GitHub Actions builds and pushes the image, and Watchtower picks it up automatically.
+  # Remove this service if you prefer to update manually with scripts/update.sh.
+  watchtower:
+    image: containrrr/watchtower:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Check Docker Hub every 5 minutes; remove old images after updating.
+    command: --interval 300 --cleanup
+    restart: unless-stopped
 
   # Optional local mail catcher — start with: docker compose --profile mailpit up
   # SMTP: localhost:1025   Web UI: http://<host-ip>:8025
