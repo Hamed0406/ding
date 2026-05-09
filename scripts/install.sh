@@ -565,8 +565,8 @@ EOF
   systemctl enable --now ding-update.timer
   success "Auto-update timer enabled — Ding will update automatically each night"
 else
-  info "Skipped. To enable later: sudo bash scripts/update.sh --install-timer"
-  info "To update manually:       sudo bash scripts/update.sh"
+  info "Skipped. To enable later: curl -fsSL https://raw.githubusercontent.com/hamed0406/ding/main/scripts/update.sh | sudo bash -s -- --install-timer"
+  info "To update manually:       curl -fsSL https://raw.githubusercontent.com/hamed0406/ding/main/scripts/update.sh | sudo bash"
 fi
 
 # ── Open firewall port optional ────────────────────────────────────────────────
@@ -618,8 +618,8 @@ echo "  Stop:            systemctl stop ding"
 echo "  Start:           systemctl start ding"
 echo "  Restart:         systemctl restart ding"
 echo "  Status:          systemctl status ding"
-echo "  Update now:      sudo bash scripts/update.sh"
-echo "  Check version:   sudo bash scripts/update.sh --check"
+echo "  Update now:      curl -fsSL https://raw.githubusercontent.com/hamed0406/ding/main/scripts/update.sh | sudo bash"
+echo "  Check version:   curl -fsSL https://raw.githubusercontent.com/hamed0406/ding/main/scripts/update.sh | sudo bash -s -- --check"
 echo ""
 echo -e "${YELLOW}${BOLD}Keep these safe:${RESET}"
 echo "  $INSTALL_DIR/.env          ← config and secret key"
