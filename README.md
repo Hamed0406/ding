@@ -522,6 +522,88 @@ All options are set via environment variables (or `.env` file when using the pro
 | `DING_GOOGLE_CLIENT_SECRET` | _(empty)_ | Google OAuth client secret |
 | `DING_GITHUB_CLIENT_ID` | _(empty)_ | GitHub OAuth client ID |
 | `DING_GITHUB_CLIENT_SECRET` | _(empty)_ | GitHub OAuth client secret |
+| `DING_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
+| `DING_LOG_FORMAT` | `text` | Log format: `text` (human-readable) or `json` (structured, for log aggregators) |
+
+---
+
+## Logging
+
+Ding writes all logs to **stderr** — it does not open a log file itself. Where you see the output depends on how you run it:
+
+| Mode | How to view live logs |
+|---|---|
+| Docker / Docker Compose | `docker compose logs -f ding` |
+| Podman | `podman logs -f ding` |
+| systemd (native binary) | `journalctl -u ding -f` |
+| Direct terminal run | stderr is printed to your terminal |
+
+### Log level and format
+
+Set these in your `.env` file or as environment variables:
+
+```bash
+DING_LOG_LEVEL=info    # debug | info | warn | error
+DING_LOG_FORMAT=text   # text (human-readable) | json (structured)
+```
+
+Use `json` format when piping logs into a collector (Loki, Elasticsearch, CloudWatch, etc.).
+
+### Save logs to a file
+
+**Docker Compose** — add a logging driver in `docker-compose.yml`:
+
+```yaml
+services:
+  ding:
+    image: hamed0406/ding:latest
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"   # rotate at 10 MB
+        max-file: "5"     # keep 5 rotated files
+```
+
+Logs land in Docker's default location (`/var/lib/docker/containers/<id>/<id>-json.log`). Read them with `docker compose logs` as usual.
+
+**systemd (native binary)** — redirect the journal to a plain file by adding `StandardError=` to the unit:
+
+```ini
+[Service]
+...
+StandardError=append:/var/log/ding.log
+```
+
+Or keep the journal and export with `journalctl`:
+
+```bash
+# Tail and follow into a file
+journalctl -u ding -f >> /var/log/ding.log &
+
+# Export everything since yesterday
+journalctl -u ding --since yesterday -o short > /var/log/ding.log
+```
+
+**Direct / manual run** — redirect stderr yourself:
+
+```bash
+# Append to a file while still seeing output in the terminal
+sudo ding 2>> /var/log/ding.log
+
+# Rotate with logrotate — save as /etc/logrotate.d/ding
+# /var/log/ding.log {
+#     daily
+#     rotate 7
+#     compress
+#     missingok
+#     notifempty
+#     postrotate
+#         # signal the process to reopen stderr (not needed for append redirect)
+#     endscript
+# }
+```
+
+> **Tip:** For production use, combine `DING_LOG_FORMAT=json` with a log shipper (Promtail → Loki, Filebeat → Elasticsearch) so you can filter and search structured fields like `level`, `addr`, `err`, etc.
 
 ---
 
