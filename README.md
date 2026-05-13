@@ -1,28 +1,89 @@
-# Ding
+<div align="center">
 
-A fast network scanner that answers: who is on your network, what are they, and what ports are open.
+# 🛰️ Ding
 
-**Architecture:** Rust handles low-level scanning (ARP, ICMP, TCP, mDNS). Go handles orchestration, enrichment, change detection, alerting, storage, and serves the web UI. The two communicate via JSON over stdout — no FFI, no shared memory.
+**A fast network scanner that answers: _who is on your network, what are they, and what ports are open._**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Docker Pulls](https://img.shields.io/docker/pulls/hamed0406/ding?logo=docker&color=2496ED)](https://hub.docker.com/r/hamed0406/ding)
+[![Latest Release](https://img.shields.io/github/v/release/Hamed0406/ding?logo=github)](https://github.com/Hamed0406/ding/releases/latest)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Rust](https://img.shields.io/badge/Rust-stable-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20RPi-lightgrey)]()
+
+</div>
+
+> **Architecture in one line:** Rust handles low-level scanning (ARP, ICMP, TCP, mDNS). Go handles orchestration, enrichment, change detection, alerting, storage, and serves the web UI. The two communicate via JSON over stdout — no FFI, no shared memory.
 
 ---
 
-## Install
+## 📸 Screenshots
+
+The UI is a React PWA — works the same in desktop browsers and installs to your home screen on Android.
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/device-grid.png" alt="Device grid view" width="280"><br>
+      <sub><b>Device grid</b><br>Every device with vendor, OS, ports, and online state.<br>ARP-spoofing banner up top.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/live-scan.png" alt="Live scan with change feed" width="280"><br>
+      <sub><b>Live scan</b><br>NEW / GONE changes stream in over SSE<br>as the scan progresses.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/device-history.png" alt="Per-device history" width="280"><br>
+      <sub><b>Per-device history</b><br>Uptime %, scan timeline, port-change markers.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/signup.png" alt="First-run signup" width="280"><br>
+      <sub><b>First-run signup</b><br>Create an admin account, or use<br>Google / GitHub OAuth.</sub>
+    </td>
+  </tr>
+</table>
+
+---
+
+## ✨ Features at a glance
+
+| | |
+|---|---|
+| 🔍 **Discovery** | ARP + ICMP + TCP + mDNS — finds every device, even quiet ones |
+| ⚡ **Real-time** | Passive ARP listener pushes device events over SSE — no waiting for the next scan |
+| 🏷️ **Smart classification** | 50+ vendor + port rules → device category & OS family |
+| 🛎️ **Alerts** | Telegram, email (AES-256-GCM encrypted SMTP), webhooks (Slack / Discord / ntfy / Home Assistant) |
+| 🛡️ **ARP-watch** | Flags IPs that suddenly show a different MAC — possible spoofing |
+| 📱 **PWA** | Installable on Android; works in any browser |
+| 🐳 **Multi-arch** | Native binaries + Docker images for `amd64` & `arm64` |
+| 📦 **Single binary** | React UI embedded via `go:embed` — one file, one process |
+
+---
+
+## 🚀 Install
 
 ### One-line install
 
-**Linux** — installs via Docker or as a native systemd service (you choose):
+<details open>
+<summary><b>🐧 Linux</b> — Docker or native systemd service (you choose)</summary>
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hamed0406/ding/main/scripts/install.sh | sudo bash
 ```
 
-**Windows** (PowerShell as Administrator) — installs via Docker Desktop or as a native Windows Service (you choose):
+</details>
+
+<details>
+<summary><b>🪟 Windows</b> — Docker Desktop or native Windows Service (PowerShell as Administrator)</summary>
 
 ```powershell
 irm https://raw.githubusercontent.com/hamed0406/ding/main/scripts/install.ps1 | iex
 ```
 
-Or download and inspect first (recommended):
+</details>
+
+**Or download and inspect first (recommended):**
 
 ```bash
 # Linux
@@ -38,38 +99,46 @@ Get-Content install.ps1 | more   # review before running
 .\install.ps1
 ```
 
-Both scripts:
-- Ask whether to use Docker or a native binary (Docker is the default)
-- Check all prerequisites before proceeding and offer to install missing ones
-- Create the install directory (`/opt/ding` on Linux, `C:\Program Files\Ding` on Windows)
-- Generate a random `DING_SECRET_KEY` automatically and save it to `.env`
-- Optionally set up Telegram alerts interactively
-- Start Ding and print the URL + your secret key (back it up!)
+**Both scripts:**
+- ✅ Ask whether to use Docker or a native binary (Docker is the default)
+- ✅ Check all prerequisites and offer to install missing ones
+- ✅ Create the install directory (`/opt/ding` on Linux, `C:\Program Files\Ding` on Windows)
+- ✅ Generate a random `DING_SECRET_KEY` automatically and save it to `.env`
+- ✅ Optionally set up Telegram alerts interactively
+- ✅ Start Ding and print the URL + your secret key (**back it up!**)
 
-> **Linux native binary:** the script installs a `systemd` service and sets `CAP_NET_RAW`/`CAP_NET_ADMIN` on the scanner binary so it does not need to run as root.
+> 💡 **Linux native binary:** the script installs a `systemd` service and sets `CAP_NET_RAW`/`CAP_NET_ADMIN` on the scanner binary so it does not need to run as root.
 >
-> **Windows native binary:** requires [Npcap](https://npcap.com) for ARP/ICMP — the script offers to download and install it for you.
+> 💡 **Windows native binary:** requires [Npcap](https://npcap.com) for ARP/ICMP — the script offers to download and install it for you.
 >
-> **Docker on Windows won't scan your LAN:** Docker Desktop runs inside a Linux VM; `network_mode: host` attaches the VM's virtual NIC, not your real adapter. Use the native binary option on Windows for full LAN scanning.
-
-For other platforms see below.
+> ⚠️ **Docker on Windows won't scan your LAN:** Docker Desktop runs inside a Linux VM; `network_mode: host` attaches the VM's virtual NIC, not your real adapter. Use the native binary option on Windows.
 
 ---
 
-Pick your platform:
+### Pick your platform
 
-- [Linux — Docker / Docker Compose](#linux--docker--docker-compose-recommended)
-- [Linux — native binary](#linux--native-binary)
-- [Linux — Podman](#linux--podman)
-- [Raspberry Pi](#raspberry-pi)
-- [macOS](#macos)
-- [Windows](#windows)
+<table>
+<tr>
+<td>
 
-> **Why Docker on Windows won't work for scanning:** Docker Desktop runs inside a Linux VM. `network_mode: host` attaches the VM's virtual NIC, not your real Wi-Fi/Ethernet adapter — ARP packets never reach your LAN. Use the native Windows binary instead.
+- [🐧 Linux — Docker / Compose](#-linux--docker--docker-compose-recommended)
+- [🐧 Linux — native binary](#-linux--native-binary)
+- [🐧 Linux — Podman](#-linux--podman)
+
+</td>
+<td>
+
+- [🥧 Raspberry Pi](#-raspberry-pi)
+- [🍎 macOS](#-macos)
+- [🪟 Windows](#-windows)
+
+</td>
+</tr>
+</table>
 
 ---
 
-### Linux — Docker / Docker Compose (recommended)
+### 🐧 Linux — Docker / Docker Compose (recommended)
 
 Pre-built images for `linux/amd64` and `linux/arm64` are published on **[Docker Hub](https://hub.docker.com/r/hamed0406/ding)** and **[GHCR](https://github.com/hamed0406/ding/pkgs/container/ding)**. No source checkout needed.
 
@@ -104,7 +173,7 @@ services:
 docker compose up -d
 ```
 
-Open **http://localhost:8081** — you'll be prompted to create an account on first visit.
+Open **<http://localhost:8081>** — you'll be prompted to create an account on first visit.
 
 **3. Day-to-day commands**
 
@@ -129,11 +198,12 @@ docker run -d \
 
 ---
 
-### Linux — native binary
+### 🐧 Linux — native binary
 
 Use this if you don't want Docker, or want to run Ding as a `systemd` service.
 
-**1. Download and extract**
+<details>
+<summary><b>1. Download and extract</b></summary>
 
 ```bash
 curl -LO https://github.com/hamed0406/ding/releases/latest/download/ding-linux-amd64.tar.gz
@@ -144,7 +214,10 @@ sudo mv ding scanner /usr/local/bin/
 
 > ARM64 (Raspberry Pi, NAS): use `ding-linux-arm64.tar.gz` instead.
 
-**2. Run manually**
+</details>
+
+<details>
+<summary><b>2. Run manually</b></summary>
 
 ```bash
 sudo ding
@@ -157,7 +230,10 @@ Configuration is done via environment variables:
 sudo DING_SCAN_INTERVAL=60s DING_HTTP_ADDR=:8081 ding
 ```
 
-**3. Run as a systemd service (auto-start on boot)**
+</details>
+
+<details>
+<summary><b>3. Run as a systemd service (auto-start on boot)</b></summary>
 
 ```bash
 sudo useradd -r -s /bin/false ding    # dedicated service user
@@ -195,7 +271,10 @@ sudo systemctl status ding
 journalctl -u ding -f           # live logs
 ```
 
-**4. Upgrade**
+</details>
+
+<details>
+<summary><b>4. Upgrade</b></summary>
 
 ```bash
 curl -LO https://github.com/hamed0406/ding/releases/latest/download/ding-linux-amd64.tar.gz
@@ -205,11 +284,14 @@ sudo mv ding scanner /usr/local/bin/
 sudo systemctl start ding
 ```
 
+</details>
+
 ---
 
-### Linux — Podman
+### 🐧 Linux — Podman
 
-**Option A — podman-compose (same workflow as Docker Compose)**
+<details>
+<summary><b>Option A — podman-compose</b> (same workflow as Docker Compose)</summary>
 
 ```bash
 pip install podman-compose
@@ -218,7 +300,10 @@ mkdir ding && cd ding
 sudo podman-compose up -d
 ```
 
-**Option B — Podman Quadlet (native systemd integration, no Docker Compose needed)**
+</details>
+
+<details>
+<summary><b>Option B — Podman Quadlet</b> (native systemd integration, no Docker Compose needed)</summary>
 
 Create `/etc/containers/systemd/ding.container`:
 
@@ -251,13 +336,16 @@ sudo systemctl status ding
 
 Podman automatically pulls the image on first start and handles updates with `podman auto-update`.
 
+</details>
+
 ---
 
-### Raspberry Pi
+### 🥧 Raspberry Pi
 
 Ding ships a native `linux/arm64` binary — tested on Raspberry Pi 3, 4, and 5 running Raspberry Pi OS (64-bit) or Ubuntu.
 
-**Docker Compose (easiest)**
+<details open>
+<summary><b>Docker Compose (easiest)</b></summary>
 
 ```bash
 # Install Docker if not present
@@ -269,9 +357,12 @@ mkdir ding && cd ding
 docker compose up -d
 ```
 
-Open **http://<pi-ip>:8081** from any device on your network.
+Open **http://\<pi-ip\>:8081** from any device on your network.
 
-**Native binary**
+</details>
+
+<details>
+<summary><b>Native binary</b></summary>
 
 ```bash
 curl -LO https://github.com/hamed0406/ding/releases/latest/download/ding-linux-arm64.tar.gz
@@ -280,21 +371,23 @@ sudo mv ding scanner /usr/local/bin/
 sudo ding
 ```
 
-Then follow the systemd service steps in the [Linux — native binary](#linux--native-binary) section.
+Then follow the systemd service steps in the [Linux — native binary](#-linux--native-binary) section.
 
-**Tips for Raspberry Pi**
+</details>
 
-- Set a static IP on your Pi so the UI URL never changes.
-- The default 512 MB swap on older Pi models is enough for normal use.
-- If you have multiple NICs (e.g. both `eth0` and `wlan0`), set `DING_INTERFACE` explicitly.
+> 💡 **Tips for Raspberry Pi**
+> - Set a static IP on your Pi so the UI URL never changes.
+> - The default 512 MB swap on older Pi models is enough for normal use.
+> - If you have multiple NICs (e.g. both `eth0` and `wlan0`), set `DING_INTERFACE` explicitly.
 
 ---
 
-### macOS
+### 🍎 macOS
 
-**Prerequisite:** raw socket access requires `sudo`. No other special drivers needed — macOS has BPF support built in.
+> 📋 **Prerequisite:** raw socket access requires `sudo`. No other special drivers needed — macOS has BPF support built in.
 
-**1. Download and extract**
+<details open>
+<summary><b>1. Download and extract</b></summary>
 
 ```bash
 # Apple Silicon (M1/M2/M3/M4)
@@ -306,7 +399,10 @@ curl -LO https://github.com/hamed0406/ding/releases/latest/download/ding-macos-a
 tar xzf ding-macos-amd64.tar.gz
 ```
 
-**2. Remove quarantine and run**
+</details>
+
+<details>
+<summary><b>2. Remove quarantine and run</b></summary>
 
 macOS Gatekeeper will block unsigned binaries downloaded from the internet. Remove the quarantine attribute before running:
 
@@ -315,9 +411,12 @@ xattr -d com.apple.quarantine ding scanner
 sudo ./ding
 ```
 
-Open **http://localhost:8081**.
+Open **<http://localhost:8081>**.
 
-**3. Pass configuration**
+</details>
+
+<details>
+<summary><b>3. Pass configuration</b></summary>
 
 ```bash
 sudo DING_SCAN_INTERVAL=60s DING_HTTP_ADDR=:8081 ./ding
@@ -333,7 +432,10 @@ export DING_DATA_PATH=/usr/local/var/ding/ding.db
 exec sudo -E /usr/local/bin/ding
 ```
 
-**4. Run as a launchd service (auto-start on login)**
+</details>
+
+<details>
+<summary><b>4. Run as a launchd service (auto-start on login)</b></summary>
 
 Save as `~/Library/LaunchAgents/com.ding.scanner.plist`:
 
@@ -370,7 +472,10 @@ launchctl load ~/Library/LaunchAgents/com.ding.scanner.plist
 
 > The plist runs the binary; the binary itself uses raw sockets which need root — macOS will prompt for your password on first launch.
 
-**5. Upgrade**
+</details>
+
+<details>
+<summary><b>5. Upgrade</b></summary>
 
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.ding.scanner.plist
@@ -378,23 +483,29 @@ launchctl unload ~/Library/LaunchAgents/com.ding.scanner.plist
 launchctl load ~/Library/LaunchAgents/com.ding.scanner.plist
 ```
 
+</details>
+
 ---
 
-### Windows
+### 🪟 Windows
 
-> Docker Desktop on Windows **will not work for scanning** — containers run in a Linux VM and ARP packets can't reach your physical network. Use the native binary.
+> ⚠️ Docker Desktop on Windows **will not work for scanning** — containers run in a Linux VM and ARP packets can't reach your physical network. Use the native binary.
 
 **Prerequisites**
 
 - Windows 10 / 11 (x86-64)
-- [Npcap](https://npcap.com) — free packet-capture driver required by the scanner. Download and install before running Ding.
+- [Npcap](https://npcap.com) — free packet-capture driver required by the scanner.
   - During install, check **"Install Npcap in WinPcap API-compatible mode"**
 
-**1. Download and extract**
+<details open>
+<summary><b>1. Download and extract</b></summary>
 
 Download `ding-windows-amd64.zip` from the [latest release](../../releases/latest) and extract it anywhere, e.g. `C:\ding\`.
 
-**2. Find your interface name**
+</details>
+
+<details>
+<summary><b>2. Find your interface name</b></summary>
 
 Open PowerShell and run:
 
@@ -404,7 +515,10 @@ Get-NetAdapter | Select-Object Name, InterfaceDescription, Status
 
 Note the **Name** of your active adapter (e.g. `Wi-Fi`, `Ethernet`).
 
-**3. Run as Administrator**
+</details>
+
+<details>
+<summary><b>3. Run as Administrator</b></summary>
 
 Right-click PowerShell → **Run as Administrator**, then:
 
@@ -416,9 +530,12 @@ $env:DING_HTTP_ADDR    = ":8081"
 .\ding.exe
 ```
 
-Open **http://localhost:8081**.
+Open **<http://localhost:8081>**.
 
-**4. Run as a Windows Service (auto-start on boot)**
+</details>
+
+<details>
+<summary><b>4. Run as a Windows Service (auto-start on boot)</b></summary>
 
 Use the built-in `sc` command or [NSSM](https://nssm.cc) (Non-Sucking Service Manager):
 
@@ -438,18 +555,24 @@ sc.exe create Ding binPath= "C:\ding\ding.exe" start= auto obj= LocalSystem
 sc.exe start Ding
 ```
 
-Configure environment variables for the `Ding` service key in the registry at  
+Configure environment variables for the `Ding` service key in the registry at
 `HKLM\SYSTEM\CurrentControlSet\Services\Ding\Environment`.
 
-**5. Firewall**
+</details>
 
-If you want to access the UI from another machine on the network, allow inbound traffic on port 8081:
+<details>
+<summary><b>5. Firewall</b></summary>
+
+To access the UI from another machine on the network, allow inbound traffic on port 8081:
 
 ```powershell
 New-NetFirewallRule -DisplayName "Ding" -Direction Inbound -Protocol TCP -LocalPort 8081 -Action Allow
 ```
 
-**6. Upgrade**
+</details>
+
+<details>
+<summary><b>6. Upgrade</b></summary>
 
 ```powershell
 sc.exe stop Ding
@@ -457,9 +580,11 @@ sc.exe stop Ding
 sc.exe start Ding
 ```
 
+</details>
+
 ---
 
-### Docker image tags
+### 🏷️ Docker image tags
 
 | Tag | When to use |
 |---|---|
@@ -473,34 +598,34 @@ A single tag is multi-arch — Docker and Podman pick `amd64` or `arm64` automat
 
 ---
 
-## Web UI
+## 🖥️ Web UI
 
 The UI is a React PWA bundled into the Go binary. It works in any browser and is installable on Android from Chrome ("Add to Home Screen").
 
 | Feature | Description |
 |---|---|
-| **Scan now** | Trigger an on-demand scan; results appear in real time via SSE |
-| **Device grid** | All discovered devices — IP, MAC, hostname, vendor, device type, OS, open ports, alive status |
-| **Search & filter** | Filter by name, IP, vendor, OS, or type; filter by online/offline status |
-| **Device history** | Click any device card to open a full-page history view — dot timeline, uptime %, scan log with port-change markers |
-| **Device labelling** | Assign a custom name ("Living Room TV") that persists across scans |
-| **Per-device port scan** | Scan one device's ports on demand — no full network scan needed |
-| **Wake-on-LAN** | Send a magic packet to wake an offline device (requires known MAC) |
-| **Notification opt-in** | Bell icon on each card — off by default; click to enable alerts per device. Brand-new devices (first-ever appearance) always alert regardless of this setting |
-| **Topology map** | Interactive SVG star-topology map; switch between Grid and Topology views |
-| **Changes feed** | NEW / GONE / BACK / PORTS changes with colour coding |
-| **Passive detection** | Devices that send ARP traffic appear instantly without waiting for a scan |
-| **Authentication** | Email/password + Google and GitHub OAuth; session persists via HttpOnly cookie and bearer token |
-| **Telegram alerts** | Each user stores their own Telegram bot token and chat ID; alerts fire per-device when the bell is enabled |
-| **Email alerts** | SMTP-based alerts — supports Gmail, Outlook, Yahoo, iCloud, Fastmail, Brevo, or any self-hosted relay (Postfix, Mailpit); configured per-user in Settings → Email |
-| **Webhook alerts** | POST a JSON payload to any URL on change events — works natively with Slack, Discord, ntfy.sh, Home Assistant |
-| **First / last seen** | Every device card shows when it was first discovered and when it last responded |
-| **Speed test** | On-demand internet speed test (ping, download, upload) via Cloudflare; results saved and shown in history |
-| **PWA** | Installable on Android; service worker disabled to avoid intercepting OAuth redirects |
+| 🔄 **Scan now** | Trigger an on-demand scan; results appear in real time via SSE |
+| 🗂️ **Device grid** | All discovered devices — IP, MAC, hostname, vendor, device type, OS, open ports, alive status |
+| 🔎 **Search & filter** | Filter by name, IP, vendor, OS, or type; filter by online/offline status |
+| 📊 **Device history** | Click any device card for a full-page history view — dot timeline, uptime %, scan log with port-change markers |
+| 🏷️ **Device labelling** | Assign a custom name ("Living Room TV") that persists across scans |
+| 🎯 **Per-device port scan** | Scan one device's ports on demand — no full network scan needed |
+| ⚡ **Wake-on-LAN** | Send a magic packet to wake an offline device (requires known MAC) |
+| 🔔 **Notification opt-in** | Bell icon on each card — off by default. Brand-new devices always alert regardless |
+| 🌐 **Topology map** | Interactive SVG star-topology map; switch between Grid and Topology views |
+| 📜 **Changes feed** | NEW / GONE / BACK / PORTS changes with colour coding |
+| 👁️ **Passive detection** | Devices that send ARP traffic appear instantly without waiting for a scan |
+| 🔐 **Authentication** | Email/password + Google and GitHub OAuth; session persists via HttpOnly cookie and bearer token |
+| 💬 **Telegram alerts** | Each user stores their own bot token and chat ID; alerts fire per-device when the bell is enabled |
+| 📧 **Email alerts** | SMTP-based — supports Gmail, Outlook, Yahoo, iCloud, Fastmail, Brevo, or any self-hosted relay |
+| 🪝 **Webhook alerts** | POST a JSON payload to any URL — works natively with Slack, Discord, ntfy.sh, Home Assistant |
+| 🕒 **First / last seen** | Every device card shows when it was first discovered and when it last responded |
+| 🚀 **Speed test** | On-demand internet speed test (ping, download, upload) via Cloudflare; results saved |
+| 📱 **PWA** | Installable on Android; service worker disabled to avoid intercepting OAuth redirects |
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
 All options are set via environment variables (or `.env` file when using the provided `docker-compose.yml`).
 
@@ -516,18 +641,18 @@ All options are set via environment variables (or `.env` file when using the pro
 | `DING_SCANNER_BIN` | `/usr/local/bin/scanner` | Path to the Rust scanner binary |
 | `DING_TELEGRAM_TOKEN` | _(empty)_ | Global fallback Telegram bot token |
 | `DING_TELEGRAM_CHAT_ID` | _(empty)_ | Global fallback Telegram chat ID |
-| `DING_SECRET_KEY` | _(empty)_ | Encrypts SMTP passwords stored in SQLite (AES-256-GCM). Generate with `openssl rand -base64 32`. If unset, passwords are stored in plaintext and a warning is logged. See [Protecting your SMTP password](#protecting-your-smtp-password-ding_secret_key). |
+| `DING_SECRET_KEY` | _(empty)_ | Encrypts SMTP passwords stored in SQLite (AES-256-GCM). See [Protecting your SMTP password](#protecting-your-smtp-password-ding_secret_key). |
 | `DING_BASE_URL` | _(empty)_ | Public URL — required behind a reverse proxy for OAuth |
 | `DING_GOOGLE_CLIENT_ID` | _(empty)_ | Google OAuth client ID |
 | `DING_GOOGLE_CLIENT_SECRET` | _(empty)_ | Google OAuth client secret |
 | `DING_GITHUB_CLIENT_ID` | _(empty)_ | GitHub OAuth client ID |
 | `DING_GITHUB_CLIENT_SECRET` | _(empty)_ | GitHub OAuth client secret |
 | `DING_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
-| `DING_LOG_FORMAT` | `text` | Log format: `text` (human-readable) or `json` (structured, for log aggregators) |
+| `DING_LOG_FORMAT` | `text` | Log format: `text` (human) or `json` (structured) |
 
 ---
 
-## Logging
+## 📝 Logging
 
 Ding writes all logs to **stderr** — it does not open a log file itself. Where you see the output depends on how you run it:
 
@@ -549,7 +674,8 @@ DING_LOG_FORMAT=text   # text (human-readable) | json (structured)
 
 Use `json` format when piping logs into a collector (Loki, Elasticsearch, CloudWatch, etc.).
 
-### Save logs to a file
+<details>
+<summary><b>Save logs to a file</b></summary>
 
 **Docker Compose** — add a logging driver in `docker-compose.yml`:
 
@@ -589,25 +715,15 @@ journalctl -u ding --since yesterday -o short > /var/log/ding.log
 ```bash
 # Append to a file while still seeing output in the terminal
 sudo ding 2>> /var/log/ding.log
-
-# Rotate with logrotate — save as /etc/logrotate.d/ding
-# /var/log/ding.log {
-#     daily
-#     rotate 7
-#     compress
-#     missingok
-#     notifempty
-#     postrotate
-#         # signal the process to reopen stderr (not needed for append redirect)
-#     endscript
-# }
 ```
 
-> **Tip:** For production use, combine `DING_LOG_FORMAT=json` with a log shipper (Promtail → Loki, Filebeat → Elasticsearch) so you can filter and search structured fields like `level`, `addr`, `err`, etc.
+</details>
+
+> 💡 **Tip:** For production, combine `DING_LOG_FORMAT=json` with a log shipper (Promtail → Loki, Filebeat → Elasticsearch) so you can filter and search structured fields like `level`, `addr`, `err`, etc.
 
 ---
 
-## REST API
+## 🔌 REST API
 
 All endpoints except the auth ones require a valid session (`Authorization: Bearer <token>` header or `ding_session` cookie).
 
@@ -671,11 +787,11 @@ curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/speedte
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/speedtest/history
 ```
 
-SSE event types: `connected`, `scan_start`, `scan_result`, `scan_error`, `device_seen`.
+**SSE event types:** `connected`, `scan_start`, `scan_result`, `scan_error`, `device_seen`.
 
 ---
 
-## Alerts
+## 🔔 Alerts
 
 Ding sends alerts when a tracked device joins, leaves, or changes ports.
 
@@ -683,17 +799,17 @@ Ding sends alerts when a tracked device joins, leaves, or changes ports.
 
 | Tier | When | Opt-out? |
 |---|---|---|
-| **Always-on** | Brand-new device (first time ever seen on your network) | No — you always want to know |
-| **Always-on** | ARP MAC change on a known IP (possible ARP spoofing) | No — security event |
-| **Per-device** | Device returns, goes offline, or changes open ports | Yes — bell icon on each card |
+| 🟢 **Always-on** | Brand-new device (first time ever seen on your network) | ❌ No — you always want to know |
+| 🔴 **Always-on** | ARP MAC change on a known IP (possible ARP spoofing) | ❌ No — security event |
+| 🔵 **Per-device** | Device returns, goes offline, or changes open ports | ✅ Yes — bell icon on each card |
 
 Per-device notifications are **disabled by default**. Enable them by clicking the bell icon on a device card (turns cyan when active).
 
-### Telegram
+### 💬 Telegram
 
 **Two ways to configure:**
 
-1. **Per-user (recommended):** Log in → gear icon → Settings → Notifications. Each user's token and chat ID are stored in their account in the database.
+1. **Per-user (recommended):** Log in → gear icon → Settings → Notifications. Each user's token and chat ID are stored in their account.
 2. **Global fallback:** Set `DING_TELEGRAM_TOKEN` and `DING_TELEGRAM_CHAT_ID` environment variables. Used only when no per-user config exists.
 
 **Setup:**
@@ -703,7 +819,7 @@ Per-device notifications are **disabled by default**. Enable them by clicking th
 3. Enter them in Settings → Notifications and click **Send test message** to confirm.
 4. Enable the bell icon on each device you want to track.
 
-### Email
+### 📧 Email
 
 Settings → Email → configure your SMTP provider. Two modes:
 
@@ -715,7 +831,7 @@ Pick your provider from the preset dropdown — host and port are filled in auto
 
 Set host to `localhost` (or the relay hostname), port to `25` (Postfix) or `1025` (Mailpit), and leave username/password blank if no auth is required.
 
-> **Testing with Mailpit:** Mailpit is a local mail catcher — it accepts all SMTP but never delivers to real inboxes. Use it to verify Ding's email plumbing before switching to a real provider. Add it alongside Ding with:
+> 🧪 **Testing with Mailpit:** Mailpit is a local mail catcher — it accepts all SMTP but never delivers to real inboxes. Use it to verify Ding's email plumbing before switching to a real provider. Add it alongside Ding with:
 > ```bash
 > docker compose --profile mailpit up -d
 > ```
@@ -723,7 +839,7 @@ Set host to `localhost` (or the relay hostname), port to `25` (Postfix) or `1025
 
 Click **Save**, then **Send test email** to confirm delivery before relying on it for alerts.
 
-#### Protecting your SMTP password (`DING_SECRET_KEY`)
+#### 🔒 Protecting your SMTP password (`DING_SECRET_KEY`)
 
 By default Ding stores your SMTP password in the SQLite database in plain text. If someone copies the database file they can read it.
 
@@ -744,13 +860,11 @@ DING_SECRET_KEY=4X3mK9vPqRzL2YwN8TdJcHbF7sAeUiGo1nQxZyCpVkW=
 
 **Step 3 — restart Ding.** Re-open Settings → Email, re-enter your SMTP password, and click Save. The password is now stored encrypted.
 
-> **Already have a saved password?**  
-> Existing plain-text passwords keep working after you set `DING_SECRET_KEY` — Ding detects unencrypted values automatically. However, they remain unencrypted in the DB until you re-save them through the Settings UI.
+> 💡 **Already have a saved password?** Existing plain-text passwords keep working after you set `DING_SECRET_KEY` — Ding detects unencrypted values automatically. They remain unencrypted in the DB until you re-save them through the Settings UI.
 
-> **Lost the key?**  
-> Without the key, stored passwords cannot be decrypted. Ding will log an error and email alerts will stop. Re-enter your SMTP password in Settings → Email after restoring the key.
+> ⚠️ **Lost the key?** Without the key, stored passwords cannot be decrypted. Ding will log an error and email alerts will stop. Re-enter your SMTP password in Settings → Email after restoring the key.
 
-### Webhooks
+### 🪝 Webhooks
 
 Settings → Webhooks → paste any HTTPS URL. Ding will POST JSON on every change event:
 
@@ -765,14 +879,16 @@ Settings → Webhooks → paste any HTTPS URL. Ding will POST JSON on every chan
 }
 ```
 
-- **Slack** — paste your Incoming Webhook URL directly; the `text` field is picked up automatically.
-- **Discord** — append `/slack` to your Discord webhook URL for Slack-compatible mode.
-- **ntfy.sh** — use `https://ntfy.sh/your-topic`; the `message` field is used.
-- **Home Assistant / n8n / Make** — any URL; parse the full JSON.
+| Platform | How |
+|---|---|
+| **Slack** | Paste your Incoming Webhook URL directly; the `text` field is picked up automatically |
+| **Discord** | Append `/slack` to your Discord webhook URL for Slack-compatible mode |
+| **ntfy.sh** | Use `https://ntfy.sh/your-topic`; the `message` field is used |
+| **Home Assistant / n8n / Make** | Any URL; parse the full JSON |
 
 ---
 
-## How it works
+## 🏗️ How it works
 
 ```
 Browser / Android PWA
@@ -790,7 +906,7 @@ Go controller (ding)
   ├── spawns Rust scanner in --mode mdns ────────────────────┘
   │     └── PTR queries → device service types (3 s window)
   ├── reverse-DNS lookup    → hostnames (16 workers, 300 ms per host)
-  ├── NetBIOS lookup        → hostnames for Windows / NAS / printers DNS misses (UDP 137, 16 workers)
+  ├── NetBIOS lookup        → hostnames for Windows / NAS / printers DNS misses
   ├── MAC vendor lookup     → IEEE OUI database embedded in binary
   ├── device classify       → 50+ vendor + port rules → device category
   ├── HTTP banner probe     → Server header + <title> on port 80/8000/8080
@@ -800,7 +916,7 @@ Go controller (ding)
   ├── diffs results         → NEW / BACK / GONE / PORTS changes
   ├── saves to /data/ding.db (SQLite) + updates first/last-seen timestamps
   ├── pushes scan events to all SSE clients
-  └── sends Telegram + email + webhook alerts (per-user config; NEW device always; bell-enabled devices for BACK/GONE/PORTS)
+  └── sends Telegram + email + webhook alerts
 
 Passive ARP listener (always running)
   └── watches ARP traffic → device_seen SSE events without waiting for scan
@@ -808,7 +924,7 @@ Passive ARP listener (always running)
 
 ---
 
-## Building from source
+## 🔨 Building from source
 
 ### Docker (recommended)
 
@@ -834,7 +950,8 @@ docker compose logs -f
 
 Raw sockets require elevated privileges: `sudo` on Linux/macOS, Administrator on Windows.
 
-**1. Build the Rust scanner**
+<details>
+<summary><b>1. Build the Rust scanner</b></summary>
 
 ```bash
 cd scanner
@@ -842,6 +959,7 @@ cargo build --release
 ```
 
 Smoke test (replace interface and subnet with yours):
+
 ```bash
 # Linux / macOS
 sudo ./target/release/scanner --interface eth0 --subnet 192.168.1.0/24
@@ -849,7 +967,10 @@ sudo ./target/release/scanner --interface eth0 --subnet 192.168.1.0/24
 .\target\release\scanner.exe --interface "Ethernet" --subnet 192.168.1.0/24
 ```
 
-**2. Build the React UI**
+</details>
+
+<details>
+<summary><b>2. Build the React UI</b></summary>
 
 ```bash
 cd ui && npm install
@@ -858,7 +979,10 @@ npm run dev    # hot-reload on :5173, proxies /api → :8081
 npm run build  # production build → dist/ (needed for the Go binary)
 ```
 
-**3. Run the Go controller**
+</details>
+
+<details>
+<summary><b>3. Run the Go controller</b></summary>
 
 ```bash
 cd controller
@@ -871,7 +995,10 @@ sudo DING_SCANNER_BIN=../scanner/target/release/scanner \
 
 Open <http://localhost:8081> (or <http://localhost:5173> for the Vite dev server).
 
-**Tests**
+</details>
+
+<details>
+<summary><b>Tests & common pitfalls</b></summary>
 
 ```bash
 cd controller && go test ./...
@@ -880,14 +1007,16 @@ cd scanner    && cargo test
 
 **Common pitfalls**
 
-- *`contains no embeddable files`* — `controller/internal/api/static/` is empty. Run `npm run build` and copy `dist/*` in.
-- *`interface not found`* — list interfaces with `ip -4 addr show` (Linux) or `ipconfig` (Windows) and set `DING_INTERFACE`.
-- *Empty scan results* — ran without `sudo` / Administrator. ARP/ICMP need elevated privileges.
-- *Windows build error about wpcap* — set `LIB=<npcap-sdk>\Lib\x64` before `cargo build`.
+- 🐛 *`contains no embeddable files`* — `controller/internal/api/static/` is empty. Run `npm run build` and copy `dist/*` in.
+- 🐛 *`interface not found`* — list interfaces with `ip -4 addr show` (Linux) or `ipconfig` (Windows) and set `DING_INTERFACE`.
+- 🐛 *Empty scan results* — ran without `sudo` / Administrator. ARP/ICMP need elevated privileges.
+- 🐛 *Windows build error about wpcap* — set `LIB=<npcap-sdk>\Lib\x64` before `cargo build`.
+
+</details>
 
 ---
 
-## Releasing
+## 🚢 Releasing
 
 Push a semver tag to trigger the release pipeline:
 
@@ -897,6 +1026,7 @@ git push origin v1.2.3
 ```
 
 GitHub Actions will:
+
 1. Build Docker images (`linux/amd64` + `linux/arm64`) → Docker Hub + GHCR
 2. Build native binaries for Linux, macOS, and Windows (5 targets)
 3. Package archives and attach them to a GitHub Release with auto-generated changelog
@@ -905,7 +1035,7 @@ Tags containing `-` (e.g. `v1.2.3-rc1`) are automatically marked as pre-releases
 
 ---
 
-## Scan data
+## 💾 Scan data
 
 Results are stored in `./data/ding.db` (SQLite). Key tables:
 
@@ -921,3 +1051,13 @@ Results are stored in `./data/ding.db` (SQLite). Key tables:
 | `speedtest_results` | Historical internet speed test results |
 
 Schema migrations run automatically on startup — no manual steps needed when upgrading. No external database service is required; the SQLite engine is compiled into the binary.
+
+---
+
+<div align="center">
+
+**Made with 🦀 Rust + 🐹 Go**
+
+Licensed under [MIT](LICENSE) · [Report a bug](https://github.com/Hamed0406/ding/issues) · [Request a feature](https://github.com/Hamed0406/ding/issues)
+
+</div>
