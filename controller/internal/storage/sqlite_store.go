@@ -53,8 +53,14 @@ func NewSQLite(path string, secretKey ...string) (*SQLiteStore, error) {
 	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
 		return nil, err
 	}
-	// SQLite supports one writer at a time; cap pool to avoid "database is locked".
-	db.SetMaxOpenConns(1)
+	// busy_timeout: if two writers collide, retry for up to 5 s before failing.
+	if _, err := db.Exec(`PRAGMA busy_timeout=5000`); err != nil {
+		return nil, err
+	}
+	// WAL allows concurrent readers; raise the pool so auth/API handlers get
+	// their own connections and are never queued behind a long-running scan write.
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
 
 	if err := sqliteMigrate(db); err != nil {
 		return nil, err
