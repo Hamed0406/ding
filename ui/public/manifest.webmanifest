@@ -1,0 +1,13 @@
+{
+  "name": "Ding Network Scanner",
+  "short_name": "Ding",
+  "description": "See who is on your network",
+  "theme_color": "#0f172a",
+  "background_color": "#0f172a",
+  "display": "standalone",
+  "scope": "/",
+  "start_url": "/",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
