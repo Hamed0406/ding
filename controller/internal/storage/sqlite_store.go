@@ -91,8 +91,9 @@ func sqliteMigrate(db *sql.DB) error {
 			gateway     TEXT,
 			ttl         INTEGER
 		);
-		CREATE INDEX IF NOT EXISTS idx_devices_scan ON devices(scan_id);
-		CREATE INDEX IF NOT EXISTS idx_devices_ip   ON devices(ip);
+		CREATE INDEX IF NOT EXISTS idx_devices_scan    ON devices(scan_id);
+		CREATE INDEX IF NOT EXISTS idx_devices_ip      ON devices(ip);
+		CREATE INDEX IF NOT EXISTS idx_devices_ip_scan ON devices(ip, scan_id);
 	`)
 	if err != nil {
 		return err
@@ -340,19 +341,22 @@ func (s *SQLiteStore) AllKnownIPs() map[string]bool {
 // only for devices that appeared in the most recent scan.
 // User-assigned labels are joined in from the device_labels table.
 func (s *SQLiteStore) AllDevices() []scanner.Result {
+	// CTE computes the latest scan_id per IP once (O(N) via idx_devices_ip_scan),
+	// avoiding the N² correlated subquery that caused hangs on large device tables.
 	rows, err := s.db.Query(`
+		WITH latest AS (
+			SELECT ip, MAX(scan_id) AS scan_id FROM devices GROUP BY ip
+		)
 		SELECT
 			d.ip, d.mac, d.hostname, d.vendor, d.device_type, d.os, d.open_ports,
 			CASE WHEN d.scan_id = (SELECT MAX(id) FROM scans) THEN d.alive ELSE 0 END,
 			d.gateway, d.ttl, l.name, COALESCE(n.enabled, 0) AS notify,
 			sa.first_seen, sa.last_seen
-		FROM devices d
+		FROM latest
+		JOIN devices d USING (ip, scan_id)
 		LEFT JOIN device_labels  l  ON l.ip  = d.ip
 		LEFT JOIN device_notify  n  ON n.ip  = d.ip
 		LEFT JOIN device_seen_at sa ON sa.ip = d.ip
-		WHERE d.scan_id = (
-			SELECT MAX(d2.scan_id) FROM devices d2 WHERE d2.ip = d.ip
-		)
 		ORDER BY d.ip
 	`)
 	if err != nil {
